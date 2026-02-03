@@ -8,6 +8,10 @@
       "version": "3.0.0"
     },
     {
+      "packageName": "@ohif/extension-monai-label",
+      "version": "3.0.0"
+    },
+    {
       "packageName": "@ohif/extension-measurement-tracking",
       "default": false,
       "version": "3.0.0"
@@ -73,6 +77,10 @@
     },
     {
       "packageName": "@ohif/mode-basic"
+    },
+    {
+      "packageName": "@ohif/mode-monai-label",
+      "version": "3.0.0"
     },
     {
       "packageName": "@ohif/mode-segmentation"

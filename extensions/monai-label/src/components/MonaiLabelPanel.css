@@ -1,0 +1,226 @@
+/*
+Copyright (c) MONAI Consortium
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+    http://www.apache.org/licenses/LICENSE-2.0
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+/*@import url("w3.css");*/
+
+.monaiLabelPanel {
+  background-color: #000;
+  height: 100%;
+  width: 100%;
+  flex-direction: column;
+  color: var(--text-primary-color);
+  padding: 2px;
+/* Accordion styles */
+}
+.monaiLabelPanel .subtitle {
+  font-size: 9px;
+  text-decoration: underline;
+  font-weight: 500;
+  color: aqua;
+  margin: 1px;
+  text-align: center;
+}
+.monaiLabelPanel .tabs {
+  border-radius: 4px;
+  overflow: auto;
+  box-shadow: 0 4px 4px -2px rgba(0,0,0,0.5);
+  margin: 1rem 0;
+}
+.monaiLabelPanel .tab {
+  width: 100%;
+  /*color: #fff;*/
+  overflow: hidden;
+}
+.monaiLabelPanel .tab-switch {
+  position: absolute;
+  opacity: 0;
+  z-index: -1;
+}
+.monaiLabelPanel .tab-label {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.4em;
+  background: #16202b;
+  border-right: 1px dotted #3c5d80;
+  color: #fff;
+  font-size: 12px;
+  font-weight: normal;
+  cursor: pointer;
+/* Icon */
+}
+.monaiLabelPanel .tab-label:hover {
+  background: #3e5975;
+}
+.monaiLabelPanel .tab-label::after {
+  content: "❯";
+  width: 1em;
+  height: 1em;
+  text-align: center;
+  transition: all 0.35s;
+}
+.monaiLabelPanel .tab-content {
+  max-height: 0;
+  padding: 0 1em;
+  background: #000;
+  transition: all 0.35s;
+  width: 90%;
+  font-size: small;
+  color: #fff;
+}
+.monaiLabelPanel .tab-close {
+  display: flex;
+  justify-content: flex-end;
+  padding: 1em;
+  font-size: 0.75em;
+  background: #2c3e50;
+  cursor: pointer;
+}
+.monaiLabelPanel .tab-close:hover {
+  background: #1a252f;
+}
+.monaiLabelPanel input:checked + .tab-label {
+  background: #00a4d9;
+}
+.monaiLabelPanel input:checked + .tab-label::after {
+  transform: rotate(90deg);
+}
+.monaiLabelPanel input:checked ~ .tab-content {
+  max-height: 100vh;
+  padding: 1em;
+}
+.monaiLabelPanel .separator {
+  border: 0.01em solid #44626f;
+  width: 100%;
+  margin-top: 3px;
+  margin-bottom: 3px;
+}
+.monaiLabelPanel .actionInput {
+  width: 100%;
+  padding: 1px;
+  border: 1px solid #000;
+  color: #000;
+}
+.monaiLabelPanel .actionButton {
+  border: 1px solid #000;
+  border-radius: 15px;
+  background-color: #00a4d9;
+  color: #000;
+  line-height: 25px;
+  padding: 10px 20px;
+  outline: none;
+  cursor: pointer;
+}
+.monaiLabelPanel .actionButton:hover,
+.monaiLabelPanel .actionButton:active {
+  background-color: #00a4d9;
+}
+.monaiLabelPanel .actionButton:disabled {
+  background-color: var(--ui-sky-blue);
+}
+.monaiLabelPanel .actionButton svg {
+  margin-right: 4px;
+  position: relative;
+  top: 2px;
+  bottom: 2px;
+}
+.monaiLabelPanel-modelSelector {
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+.monaiLabelPanel-modelSelectorLabel {
+  display: block;
+  font-size: 11px;
+  color: #8b949e;
+  margin-bottom: 4px;
+}
+
+.monaiLabelPanel-modelSelect {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: #e6edf3;
+  background-color: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.monaiLabelPanel-modelSelect:focus {
+  outline: none;
+  border-color: #00a4d9;
+}
+
+.monaiLabelPanel-modelSelect option {
+  background-color: #0d1117;
+  color: #e6edf3;
+}
+
+.monaiLabelPanel-triggerDeploy {
+  margin-top: 10px;
+  margin-bottom: 14px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  /* Removed background, border-radius, box-shadow for no gray box */
+  padding: 12px 0 10px 0;
+}
+
+.monaiLabelPanel-triggerDeploy .actionButton {
+  width: 56%;
+  font-size: 1rem;
+  font-weight: 500;
+  font-family: 'Segoe UI', 'Arial', sans-serif;
+  letter-spacing: 0.25px;
+  color: #fff;
+  background: #1577d6;
+  border: 1px solid #1b2840;
+  border-radius: 8px;
+  padding: 10px 0;
+  box-shadow: 0 1.5px 6px 0 rgba(38,118,178,0.10);
+  transition: background 0.15s, transform 0.12s, box-shadow 0.16s, border-color 0.13s;
+  cursor: pointer;
+  outline: none;
+  text-shadow: none;
+}
+
+.monaiLabelPanel-triggerDeploy .actionButton:hover,
+.monaiLabelPanel-triggerDeploy .actionButton:active {
+  background: #2988e0;
+  border-color: #2180c0;
+  transform: translateY(-1px) scale(1.01);
+  box-shadow: 0 4px 14px 0 rgba(38,98,160,0.12);
+}
+
+.monaiLabelPanel-triggerDeploy .actionButton:disabled {
+  background: #4d5a64;
+  color: #cad6de;
+  cursor: not-allowed;
+  border-color: #36404c;
+  opacity: 0.60;
+  box-shadow: none;
+}
+.scrollbar {
+  overflow-y: scroll;
+}
+#style-3::-webkit-scrollbar-track {
+  -webkit-box-shadow: inset 0 0 6px rgba(0,0,0,0.3);
+  background-color: #000;
+}
+#style-3::-webkit-scrollbar {
+  width: 6px;
+  background-color: #000;
+}
+#style-3::-webkit-scrollbar-thumb {
+  background-color: #f5f5f5;
+}
