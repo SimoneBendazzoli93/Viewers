@@ -341,3 +341,22 @@ MIT © [OHIF](https://github.com/OHIF)
 <!-- prettier-ignore-end -->
 
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FOHIF%2FViewers.svg?type=large&issueType=license)](https://app.fossa.com/projects/git%2Bgithub.com%2FOHIF%2FViewers?ref=badge_large&issueType=license)
+
+## Install Node.js and Yarn
+### Download and install nvm:
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+
+### in lieu of restarting the shell
+\. "$HOME/.nvm/nvm.sh"
+
+### Download and install Node.js:
+nvm install 24
+
+### Verify the Node.js version:
+node -v # Should print "v24.13.0".
+
+### Download and install Yarn:
+corepack enable yarn
+
+### Verify Yarn version:
+yarn -v
