@@ -72,6 +72,10 @@ export const segmentation = {
   viewport: '@ohif/extension-cornerstone-dicom-seg.viewportModule.dicom-seg',
 };
 
+export const aiAssist = {
+  panel: '@ohif/extension-ai-assist.panelModule.aiAssistant',
+};
+
 export const extensionDependencies = {
   // Can derive the versions at least process.env.from npm_package_version
   '@ohif/extension-default': '^3.0.0',
@@ -82,6 +86,7 @@ export const extensionDependencies = {
   '@ohif/extension-cornerstone-dicom-rt': '^3.0.0',
   '@ohif/extension-dicom-pdf': '^3.0.1',
   '@ohif/extension-dicom-video': '^3.0.1',
+  '@ohif/extension-ai-assist': '^3.0.0',
 };
 
 export const sopClassHandlers = [
@@ -281,7 +286,7 @@ export const basicLayout = {
   props: {
     leftPanels: [ohif.thumbnailList],
     leftPanelResizable: true,
-    rightPanels: [cornerstone.segmentation, cornerstone.measurements],
+    rightPanels: [aiAssist.panel, cornerstone.segmentation, cornerstone.measurements],
     rightPanelClosed: true,
     rightPanelResizable: true,
     viewports: [

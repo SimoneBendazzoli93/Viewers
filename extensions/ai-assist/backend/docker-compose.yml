@@ -1,0 +1,70 @@
+version: "3.9"
+
+services:
+  # ── AI Assistant Backend ────────────────────────────────────────────────────
+  ai-assist:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ohif-ai-assist
+    ports:
+      - "8000:8000"
+    environment:
+      # LLM Provider API Keys (set in your shell or a .env file)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+
+      # Default model settings
+      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-openai}
+      - DEFAULT_LLM_MODEL=${DEFAULT_LLM_MODEL:-gpt-4o}
+      - DEFAULT_SEGMENTATION_MODEL=${DEFAULT_SEGMENTATION_MODEL:-totalsegmentator}
+
+      # Ollama (if using local models)
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+
+      # Storage paths (inside container)
+      - DICOM_CACHE_DIR=/data/dicom-cache
+      - SEGMENTATION_OUTPUT_DIR=/data/seg-output
+      - RADIOMICS_OUTPUT_DIR=/data/radiomics-output
+
+      - DEBUG=${DEBUG:-false}
+    volumes:
+      - ai-assist-data:/data
+      # Mount GPU model weights if using local models
+      # - ${TOTALSEG_WEIGHTS_DIR:-./weights}:/root/.totalsegmentator
+    # Uncomment to enable GPU support (requires nvidia-container-toolkit)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Ollama (optional local LLM) ────────────────────────────────────────────
+  # Uncomment to run local models via Ollama
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: ohif-ollama
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama-data:/root/.ollama
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]
+
+volumes:
+  ai-assist-data:
+  # ollama-data:

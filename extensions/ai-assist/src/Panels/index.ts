@@ -1,0 +1,1 @@
+export { PanelAIAssistant } from './PanelAIAssistant';
