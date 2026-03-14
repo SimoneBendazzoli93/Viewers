@@ -283,11 +283,21 @@ export function AgentConfigPanel({ config, onSave, onClose }: Props) {
           >
             <option value="localStorage">localStorage — persists across sessions</option>
             <option value="sessionStorage">sessionStorage — cleared on tab close</option>
+            <option value="server">Server (local path) — saved as JSON files on the backend</option>
             <option value="none">None — in-memory only (not saved)</option>
           </select>
           <p className="mt-1 text-xs text-gray-500">
-            History is keyed per study, so each study has its own independent chat log.
+            History is keyed per study. Each study has its own independent chat log.
           </p>
+          {local.chatHistoryStorage === 'server' && (
+            <p className="mt-1 rounded border border-blue-800 bg-blue-950 px-2 py-1.5 text-xs text-blue-300">
+              The save path is configured server-side via the{' '}
+              <code className="font-mono">CHAT_HISTORY_DIR</code> environment variable
+              (default: <code className="font-mono">/tmp/ohif-ai-chat-history</code>).
+              Each study is stored as{' '}
+              <code className="font-mono">&lt;CHAT_HISTORY_DIR&gt;/&lt;StudyInstanceUID&gt;.json</code>.
+            </p>
+          )}
         </div>
 
         {/* Active Segmentation Model */}

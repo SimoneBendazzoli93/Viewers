@@ -89,7 +89,73 @@ class ChatRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.0.0"}
+    return {
+        "status": "ok",
+        "version": "1.0.0",
+        "chat_history_dir": str(settings.chat_history_dir),
+    }
+
+
+# ── Chat history persistence ──────────────────────────────────────────────────
+
+class ChatHistoryMessage(BaseModel):
+    role: str
+    content: str
+    timestamp: Optional[str] = None
+    toolName: Optional[str] = None
+    toolStatus: Optional[str] = None
+    toolResult: Optional[str] = None
+
+
+class ChatHistorySaveRequest(BaseModel):
+    messages: list[ChatHistoryMessage]
+
+
+@app.get("/api/chat/history/{study_uid}")
+async def get_chat_history(study_uid: str):
+    """
+    Load persisted chat history for a study from the server's chat_history_dir.
+    Returns an empty list if no history file exists yet.
+    """
+    history_file = settings.chat_history_dir / f"{study_uid}.json"
+    if not history_file.exists():
+        return {"messages": [], "path": str(history_file)}
+    try:
+        content = history_file.read_text(encoding="utf-8")
+        messages = json.loads(content)
+        return {"messages": messages, "path": str(history_file)}
+    except Exception as exc:
+        logger.error("Failed to read chat history for %s: %s", study_uid, exc)
+        return {"messages": [], "path": str(history_file), "error": str(exc)}
+
+
+@app.post("/api/chat/history/{study_uid}")
+async def save_chat_history(study_uid: str, body: ChatHistorySaveRequest):
+    """
+    Persist chat history for a study to the server's chat_history_dir.
+    Creates the file if it does not exist; overwrites it otherwise.
+    """
+    history_file = settings.chat_history_dir / f"{study_uid}.json"
+    try:
+        history_file.write_text(
+            json.dumps([m.model_dump(exclude_none=True) for m in body.messages], indent=2),
+            encoding="utf-8",
+        )
+        logger.info("Saved chat history for %s → %s (%d messages)", study_uid, history_file, len(body.messages))
+        return {"status": "ok", "path": str(history_file), "count": len(body.messages)}
+    except Exception as exc:
+        logger.error("Failed to save chat history for %s: %s", study_uid, exc)
+        return {"status": "error", "error": str(exc)}
+
+
+@app.delete("/api/chat/history/{study_uid}")
+async def delete_chat_history(study_uid: str):
+    """Delete the persisted chat history file for a study."""
+    history_file = settings.chat_history_dir / f"{study_uid}.json"
+    if history_file.exists():
+        history_file.unlink()
+        logger.info("Deleted chat history for %s", study_uid)
+    return {"status": "ok"}
 
 
 async def _fetch_ollama_models(base_url: str, api_key: str | None = None) -> list[dict]:

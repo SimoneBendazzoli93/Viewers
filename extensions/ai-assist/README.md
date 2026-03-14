@@ -10,6 +10,7 @@ AI Agent Assistant extension for the OHIF Viewer, providing an interactive chat 
 - **Radiomics Extraction** — Extract quantitative features using PyRadiomics
 - **Customizable LLMs** — OpenAI, Anthropic, Ollama (local), OpenRouter, Azure OpenAI
 - **Customizable Segmentation Models** — TotalSegmentator, nnU-Net, and custom REST endpoints
+- **Per-Study Chat Persistence** — Chat history is stored separately per study and survives page refreshes
 
 ## Architecture
 
@@ -99,6 +100,34 @@ The panel includes one-click buttons for:
 - **Radiomics** — Extract quantitative imaging features
 - **Describe** — Describe the current study and findings
 
+### Chat History Persistence
+
+The panel remembers the conversation for each study independently. You can choose where history is stored via **⚙ Settings → Chat History Storage**:
+
+| Option | Description |
+|--------|-------------|
+| **localStorage** | Stored in the browser's `localStorage`. Survives page refreshes and browser restarts. Default. |
+| **sessionStorage** | Stored in the browser's `sessionStorage`. Cleared when the browser tab is closed. |
+| **Server (local path)** | Saved as JSON files on the backend server at a configurable path. Survives browser data clearing and is accessible across devices sharing the same backend. |
+| **None** | In-memory only. History is lost on page refresh. |
+
+#### Server-side storage path
+
+When using **Server (local path)**, history files are written to the directory configured by `CHAT_HISTORY_DIR` on the backend. Each study produces one file:
+
+```
+<CHAT_HISTORY_DIR>/<StudyInstanceUID>.json
+```
+
+Set the path in your `.env` file or as an environment variable:
+
+```bash
+# .env
+CHAT_HISTORY_DIR=/data/ohif-chat-history
+```
+
+The default is `/tmp/ohif-ai-chat-history`. The directory is created automatically on backend startup.
+
 ---
 
 ## Backend Environment Variables
@@ -115,6 +144,7 @@ The panel includes one-click buttons for:
 | `CUSTOM_SEG_ENDPOINTS`    | —              | `id:url` pairs, comma-separated     |
 | `TOTALSEGMENTATOR_TASK`   | `total`        | TotalSegmentator task               |
 | `TOTALSEGMENTATOR_FAST`   | `false`        | Use fast mode                       |
+| `CHAT_HISTORY_DIR`        | `/tmp/ohif-ai-chat-history` | Directory for server-side chat history files |
 | `PORT`                    | `8000`         | Backend server port                 |
 | `DEBUG`                   | `false`        | Enable debug logging                |
 
@@ -159,9 +189,35 @@ data: [DONE]
 
 Returns available LLM and segmentation models.
 
+### `GET /api/chat/history/{study_uid}`
+
+Load persisted chat history for a study (server storage backend only).
+
+**Response:**
+```json
+{
+  "messages": [{"role": "user", "content": "...", "timestamp": "2024-01-01T00:00:00Z"}, ...],
+  "path": "/tmp/ohif-ai-chat-history/1.2.3.json"
+}
+```
+Returns `{"messages": []}` if no history file exists yet.
+
+### `POST /api/chat/history/{study_uid}`
+
+Persist chat history for a study (overwrites any existing file).
+
+**Request body:**
+```json
+{"messages": [{"role": "user", "content": "...", "timestamp": "..."}]}
+```
+
+### `DELETE /api/chat/history/{study_uid}`
+
+Delete the persisted history file for a study.
+
 ### `GET /health`
 
-Health check endpoint.
+Health check endpoint. Also reports the configured `chat_history_dir`.
 
 ---
 

@@ -134,6 +134,10 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   );
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     const cfg = agentService.getConfig();
+    // Server storage loads asynchronously via useEffect; start with welcome message
+    if (cfg.chatHistoryStorage === 'server') {
+      return [{ ...WELCOME_MESSAGE, timestamp: new Date() }];
+    }
     return loadHistory(getActiveStudyUID(services), cfg.chatHistoryStorage);
   });
   const [input, setInput] = useState('');
@@ -147,11 +151,28 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const streamingMessageIdRef = useRef<string | null>(null);
   const activeStudyUIDRef = useRef<string | null>(activeStudyUID);
   activeStudyUIDRef.current = activeStudyUID;
+  const serverSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Persist messages whenever they change
+  // Persist messages whenever they change (browser storage = sync; server = debounced 1.5 s)
   useEffect(() => {
-    saveHistory(activeStudyUID, messages, config.chatHistoryStorage);
+    if (config.chatHistoryStorage === 'server') {
+      if (!activeStudyUID) return;
+      if (serverSaveTimerRef.current) clearTimeout(serverSaveTimerRef.current);
+      serverSaveTimerRef.current = setTimeout(() => {
+        agentService.saveServerHistory(activeStudyUID, messages);
+      }, 1500);
+    } else {
+      saveHistory(activeStudyUID, messages, config.chatHistoryStorage);
+    }
   }, [messages, activeStudyUID, config.chatHistoryStorage]);
+
+  // Load server history when storage type is 'server' and study changes
+  useEffect(() => {
+    if (config.chatHistoryStorage !== 'server' || !activeStudyUID) return;
+    agentService.loadServerHistory(activeStudyUID).then(loaded => {
+      if (loaded.length > 0) setMessages(loaded);
+    });
+  }, [activeStudyUID, config.chatHistoryStorage]);
 
   // Watch for active study changes via viewport grid events
   useEffect(() => {
@@ -162,7 +183,13 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
       const newStudyUID = getActiveStudyUID(services);
       if (newStudyUID !== activeStudyUIDRef.current) {
         setActiveStudyUID(newStudyUID);
-        setMessages(loadHistory(newStudyUID, agentService.getConfig().chatHistoryStorage));
+        const cfg = agentService.getConfig();
+        if (cfg.chatHistoryStorage !== 'server') {
+          setMessages(loadHistory(newStudyUID, cfg.chatHistoryStorage));
+        } else {
+          setMessages([{ ...WELCOME_MESSAGE, timestamp: new Date() }]);
+          // server load triggered by the activeStudyUID effect above
+        }
       }
     };
 
@@ -344,7 +371,11 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   };
 
   const handleClearChat = () => {
-    clearHistory(activeStudyUID, config.chatHistoryStorage);
+    if (config.chatHistoryStorage === 'server' && activeStudyUID) {
+      agentService.deleteServerHistory(activeStudyUID);
+    } else {
+      clearHistory(activeStudyUID, config.chatHistoryStorage);
+    }
     setMessages([
       {
         id: nextId(),

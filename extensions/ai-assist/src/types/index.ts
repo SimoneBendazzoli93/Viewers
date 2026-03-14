@@ -8,7 +8,7 @@ export interface ChatMessage {
   toolResult?: string;
 }
 
-export type ChatHistoryStorage = 'localStorage' | 'sessionStorage' | 'none';
+export type ChatHistoryStorage = 'localStorage' | 'sessionStorage' | 'none' | 'server';
 
 export interface AgentConfig {
   backendUrl: string;

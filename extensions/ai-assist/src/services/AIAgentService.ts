@@ -144,6 +144,42 @@ export class AIAgentService {
     this.abortController?.abort();
   }
 
+  async loadServerHistory(studyUID: string): Promise<ChatMessage[]> {
+    try {
+      const resp = await fetch(`${this.config.backendUrl}/api/chat/history/${encodeURIComponent(studyUID)}`);
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.messages ?? []).map((m: ChatMessage & { timestamp: string }) => ({
+        ...m,
+        timestamp: new Date(m.timestamp),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  async saveServerHistory(studyUID: string, messages: ChatMessage[]): Promise<void> {
+    try {
+      await fetch(`${this.config.backendUrl}/api/chat/history/${encodeURIComponent(studyUID)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages }),
+      });
+    } catch {
+      // silently ignore network errors
+    }
+  }
+
+  async deleteServerHistory(studyUID: string): Promise<void> {
+    try {
+      await fetch(`${this.config.backendUrl}/api/chat/history/${encodeURIComponent(studyUID)}`, {
+        method: 'DELETE',
+      });
+    } catch {
+      // silently ignore
+    }
+  }
+
   async checkBackendHealth(): Promise<{ ok: boolean; version?: string }> {
     try {
       const resp = await fetch(`${this.config.backendUrl}/health`, { method: 'GET' });

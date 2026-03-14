@@ -68,6 +68,12 @@ class Settings(BaseSettings):
     # ── Radiomics ─────────────────────────────────────────────────────────
     radiomics_params_file: Path | None = None  # optional PyRadiomics params YAML
 
+    # ── Chat history ──────────────────────────────────────────────────────
+    # Directory where per-study chat history JSON files are stored when the
+    # frontend uses the "server" storage backend.
+    # Each study gets its own file: <chat_history_dir>/<studyInstanceUID>.json
+    chat_history_dir: Path = Path("/tmp/ohif-ai-chat-history")
+
 
 settings = Settings()
 
@@ -75,3 +81,4 @@ settings = Settings()
 settings.dicom_cache_dir.mkdir(parents=True, exist_ok=True)
 settings.segmentation_output_dir.mkdir(parents=True, exist_ok=True)
 settings.radiomics_output_dir.mkdir(parents=True, exist_ok=True)
+settings.chat_history_dir.mkdir(parents=True, exist_ok=True)
