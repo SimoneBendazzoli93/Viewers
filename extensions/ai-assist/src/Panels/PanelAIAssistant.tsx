@@ -25,13 +25,31 @@ function buildStudyContext(servicesManager: AppTypes.ServicesManager) {
     const displaySet = displaySetService.getDisplaySetByUID(uid);
     if (!displaySet) return null;
 
+    const studyUID = displaySet.StudyInstanceUID;
+
+    // Find all DICOM SEG series belonging to the same study
+    const allDisplaySets: AppTypes.DisplaySet[] = displaySetService.activeDisplaySets ?? [];
+    const availableSegmentations = allDisplaySets
+      .filter(
+        ds =>
+          ds.StudyInstanceUID === studyUID &&
+          ds.Modality === 'SEG' &&
+          ds.SeriesInstanceUID !== displaySet.SeriesInstanceUID
+      )
+      .map(ds => ({
+        seriesInstanceUID: ds.SeriesInstanceUID,
+        seriesDescription: ds.SeriesDescription ?? '',
+        referencedSeriesInstanceUID: ds.referencedSeriesInstanceUID ?? ds.ReferencedSeriesInstanceUID ?? '',
+      }));
+
     return {
-      studyInstanceUID: displaySet.StudyInstanceUID,
+      studyInstanceUID: studyUID,
       seriesInstanceUID: displaySet.SeriesInstanceUID,
       sopInstanceUID: displaySet.SOPInstanceUID,
       patientName: displaySet.PatientName,
       studyDate: displaySet.StudyDate,
       modality: displaySet.Modality,
+      availableSegmentations: availableSegmentations.length > 0 ? availableSegmentations : undefined,
     };
   } catch {
     return null;

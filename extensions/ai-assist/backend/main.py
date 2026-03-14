@@ -56,6 +56,12 @@ class AgentRequestConfig(BaseModel):
     api_key: Optional[str] = None
 
 
+class DicomSegInfo(BaseModel):
+    seriesInstanceUID: str
+    seriesDescription: Optional[str] = None
+    referencedSeriesInstanceUID: Optional[str] = None
+
+
 class StudyContext(BaseModel):
     studyInstanceUID: Optional[str] = None
     seriesInstanceUID: Optional[str] = None
@@ -64,6 +70,7 @@ class StudyContext(BaseModel):
     studyDate: Optional[str] = None
     modality: Optional[str] = None
     dicomwebUrl: Optional[str] = None
+    availableSegmentations: Optional[list[DicomSegInfo]] = None
 
 
 class HistoryMessage(BaseModel):

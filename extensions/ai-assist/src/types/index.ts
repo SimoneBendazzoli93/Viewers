@@ -35,6 +35,12 @@ export interface LLMModelOption {
   description?: string;
 }
 
+export interface DicomSegInfo {
+  seriesInstanceUID: string;
+  seriesDescription?: string;
+  referencedSeriesInstanceUID?: string;
+}
+
 export interface AgentAction {
   type: 'segmentation' | 'radiomics' | 'report' | 'query';
   parameters?: Record<string, unknown>;
