@@ -69,11 +69,15 @@ def create_llm(
             from langchain_ollama import ChatOllama
         except ImportError:
             raise ValueError("langchain-ollama is not installed.")
-        return ChatOllama(
+        resolved_key = api_key or settings.ollama_api_key
+        kwargs: dict = dict(
             model=model,
             temperature=temperature,
             base_url=settings.ollama_base_url,
         )
+        if resolved_key:
+            kwargs["headers"] = {"Authorization": f"Bearer {resolved_key}"}
+        return ChatOllama(**kwargs)
 
     elif provider == "openrouter":
         # OpenRouter uses the OpenAI-compatible API

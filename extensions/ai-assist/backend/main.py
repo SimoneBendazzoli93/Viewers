@@ -2,9 +2,10 @@
 OHIF AI Assistant Backend
 
 FastAPI application providing:
-  POST /api/chat/stream  – streaming chat endpoint (SSE)
-  GET  /api/models        – list available LLM and segmentation models
-  GET  /health            – health check
+  POST /api/chat/stream       – streaming chat endpoint (SSE)
+  GET  /api/models            – list all available LLM and segmentation models
+  GET  /api/ollama/models     – probe an Ollama server and return its model list
+  GET  /health                – health check
 """
 from __future__ import annotations
 
@@ -13,8 +14,9 @@ import logging
 import sys
 from typing import Optional
 
+import httpx
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -83,17 +85,74 @@ async def health():
     return {"status": "ok", "version": "1.0.0"}
 
 
+async def _fetch_ollama_models(base_url: str, api_key: str | None = None) -> list[dict]:
+    """
+    Query an Ollama server's /api/tags endpoint and return a list of model dicts.
+    Returns an empty list (with an error entry) if the server is unreachable.
+    """
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(f"{base_url.rstrip('/')}/api/tags", headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            return [
+                {
+                    "id": m["name"],
+                    "name": m["name"],
+                    "provider": "ollama",
+                    "description": f"Size: {m.get('size', 0) // 1_000_000_000:.1f} GB"
+                    if m.get("size")
+                    else "Ollama model",
+                }
+                for m in data.get("models", [])
+            ]
+    except Exception as exc:
+        logger.warning("Could not reach Ollama at %s: %s", base_url, exc)
+        return []
+
+
+@app.get("/api/ollama/models")
+async def ollama_models(
+    base_url: str = Query(default=None, description="Ollama base URL to probe"),
+    authorization: str | None = Header(default=None),
+):
+    """
+    Probe an Ollama server and return its installed model list.
+
+    - `base_url` query param overrides the configured OLLAMA_BASE_URL so the
+      config panel can test connectivity to a new URL before saving.
+    - Passes the `Authorization` request header to Ollama (Bearer token).
+    """
+    url = base_url or settings.ollama_base_url
+    api_key = None
+    if authorization and authorization.lower().startswith("bearer "):
+        api_key = authorization[7:]
+    elif not authorization:
+        api_key = settings.ollama_api_key
+
+    models = await _fetch_ollama_models(url, api_key)
+    return {"models": models, "base_url": url}
+
+
 @app.get("/api/models")
 async def list_models():
-    """Return available LLM models and segmentation models."""
+    """Return available LLM models (Ollama list fetched live) and segmentation models."""
+    # Static models for cloud providers
     llm_models = [
-        {"id": "gpt-4o",            "name": "GPT-4o",              "provider": "openai"},
-        {"id": "gpt-4o-mini",       "name": "GPT-4o Mini",         "provider": "openai"},
-        {"id": "claude-opus-4-6",   "name": "Claude Opus 4.6",     "provider": "anthropic"},
-        {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6",   "provider": "anthropic"},
-        {"id": "llama3.2",          "name": "Llama 3.2 (local)",   "provider": "ollama"},
-        {"id": "mistral",           "name": "Mistral (local)",     "provider": "ollama"},
+        {"id": "gpt-4o",            "name": "GPT-4o",            "provider": "openai"},
+        {"id": "gpt-4o-mini",       "name": "GPT-4o Mini",       "provider": "openai"},
+        {"id": "claude-opus-4-6",   "name": "Claude Opus 4.6",   "provider": "anthropic"},
+        {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "provider": "anthropic"},
     ]
+
+    # Live Ollama models
+    ollama_models_list = await _fetch_ollama_models(
+        settings.ollama_base_url, settings.ollama_api_key
+    )
+    llm_models.extend(ollama_models_list)
 
     seg_models = [
         {

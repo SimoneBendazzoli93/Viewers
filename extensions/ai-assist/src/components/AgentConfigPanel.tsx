@@ -1,36 +1,87 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import type { AgentConfig, LLMProvider, SegmentationModelConfig } from '../types';
+import type { AgentConfig, LLMModelOption, LLMProvider, SegmentationModelConfig } from '../types';
 import { DEFAULT_LLM_MODELS } from '../services/AIAgentService';
 
 interface Props {
   config: AgentConfig;
   onSave: (config: AgentConfig) => void;
   onClose: () => void;
-  availableSegmentationModels?: SegmentationModelConfig[];
 }
 
 const PROVIDERS: { value: LLMProvider; label: string }[] = [
   { value: 'openai', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
-  { value: 'ollama', label: 'Ollama (local)' },
+  { value: 'ollama', label: 'Ollama' },
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'azure', label: 'Azure OpenAI' },
 ];
 
-export function AgentConfigPanel({ config, onSave, onClose, availableSegmentationModels }: Props) {
+const API_KEY_PLACEHOLDER: Record<LLMProvider, string> = {
+  openai: 'sk-...',
+  anthropic: 'sk-ant-...',
+  ollama: 'Bearer token (if required by your Ollama server)',
+  openrouter: 'sk-or-...',
+  azure: 'Azure API key',
+};
+
+export function AgentConfigPanel({ config, onSave, onClose }: Props) {
   const [local, setLocal] = useState<AgentConfig>({ ...config });
-  const [customModelInput, setCustomModelInput] = useState('');
   const [customSegModelName, setCustomSegModelName] = useState('');
   const [customSegModelEndpoint, setCustomSegModelEndpoint] = useState('');
 
-  const filteredModels = DEFAULT_LLM_MODELS.filter(m => m.provider === local.llmProvider);
+  // Ollama model fetching state
+  const [ollamaModels, setOllamaModels] = useState<LLMModelOption[]>([]);
+  const [ollamaLoading, setOllamaLoading] = useState(false);
+  const [ollamaError, setOllamaError] = useState<string | null>(null);
+
+  // For non-Ollama providers, use the static list
+  const staticModels = DEFAULT_LLM_MODELS.filter(m => m.provider === local.llmProvider);
+  const isOllama = local.llmProvider === 'ollama';
+  const activeModels = isOllama ? ollamaModels : staticModels;
+
+  const fetchOllamaModels = useCallback(async () => {
+    setOllamaLoading(true);
+    setOllamaError(null);
+    try {
+      const url = new URL(`${local.backendUrl}/api/ollama/models`);
+      const headers: Record<string, string> = {};
+      if (local.apiKey) {
+        headers['Authorization'] = `Bearer ${local.apiKey}`;
+      }
+      const resp = await fetch(url.toString(), { headers });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const models: LLMModelOption[] = (data.models ?? []).map((m: { id: string; name: string; description?: string }) => ({
+        id: m.id,
+        name: m.name,
+        provider: 'ollama' as LLMProvider,
+        description: m.description,
+      }));
+      setOllamaModels(models);
+      if (models.length > 0 && !models.find(m => m.id === local.llmModel)) {
+        setLocal(prev => ({ ...prev, llmModel: models[0].id }));
+      }
+    } catch (err: unknown) {
+      setOllamaError(err instanceof Error ? err.message : 'Could not reach Ollama server');
+      setOllamaModels([]);
+    } finally {
+      setOllamaLoading(false);
+    }
+  }, [local.backendUrl, local.apiKey, local.llmModel]);
+
+  // Fetch Ollama models whenever we're on the Ollama provider
+  useEffect(() => {
+    if (isOllama) {
+      fetchOllamaModels();
+    }
+  }, [isOllama]); // intentionally only on provider switch, not on every keystroke
 
   const handleProviderChange = (provider: LLMProvider) => {
-    const firstModel = DEFAULT_LLM_MODELS.find(m => m.provider === provider);
+    const firstStatic = DEFAULT_LLM_MODELS.find(m => m.provider === provider);
     setLocal(prev => ({
       ...prev,
       llmProvider: provider,
-      llmModel: firstModel?.id ?? '',
+      llmModel: firstStatic?.id ?? '',
     }));
   };
 
@@ -66,16 +117,13 @@ export function AgentConfigPanel({ config, onSave, onClose, availableSegmentatio
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-gray-700 px-4 py-3">
         <span className="text-sm font-semibold text-white">Agent Configuration</span>
-        <button
-          onClick={onClose}
-          className="text-gray-400 hover:text-white"
-          aria-label="Close config"
-        >
+        <button onClick={onClose} className="text-gray-400 hover:text-white" aria-label="Close config">
           ✕
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+
         {/* Backend URL */}
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-300">Backend URL</label>
@@ -102,16 +150,82 @@ export function AgentConfigPanel({ config, onSave, onClose, availableSegmentatio
           </select>
         </div>
 
+        {/* API Key — shown for all providers */}
+        <div>
+          <label className="mb-1 block text-xs font-medium text-gray-300">
+            API Key
+            <span className="ml-1 text-gray-500">(stored in browser only)</span>
+          </label>
+          <input
+            type="password"
+            className="w-full rounded border border-gray-600 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-blue-500 focus:outline-none"
+            value={local.apiKey ?? ''}
+            onChange={e => setLocal(prev => ({ ...prev, apiKey: e.target.value }))}
+            placeholder={API_KEY_PLACEHOLDER[local.llmProvider]}
+          />
+        </div>
+
         {/* LLM Model */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-300">Model</label>
-          {filteredModels.length > 0 ? (
+          <div className="mb-1 flex items-center justify-between">
+            <label className="text-xs font-medium text-gray-300">Model</label>
+            {isOllama && (
+              <button
+                onClick={fetchOllamaModels}
+                disabled={ollamaLoading}
+                className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40"
+              >
+                {ollamaLoading ? '⟳ Loading...' : '↻ Refresh'}
+              </button>
+            )}
+          </div>
+
+          {isOllama ? (
+            ollamaLoading ? (
+              <div className="rounded border border-gray-600 bg-gray-800 px-2 py-2 text-xs text-gray-400">
+                Fetching models from Ollama server...
+              </div>
+            ) : ollamaError ? (
+              <div className="space-y-1.5">
+                <div className="rounded border border-red-800 bg-red-950 px-2 py-1.5 text-xs text-red-300">
+                  {ollamaError}
+                </div>
+                <input
+                  type="text"
+                  className="w-full rounded border border-gray-600 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-blue-500 focus:outline-none"
+                  value={local.llmModel}
+                  onChange={e => setLocal(prev => ({ ...prev, llmModel: e.target.value }))}
+                  placeholder="Enter model name manually (e.g. qwen3:32b)"
+                />
+              </div>
+            ) : ollamaModels.length > 0 ? (
+              <select
+                className="w-full rounded border border-gray-600 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-blue-500 focus:outline-none"
+                value={local.llmModel}
+                onChange={e => setLocal(prev => ({ ...prev, llmModel: e.target.value }))}
+              >
+                {ollamaModels.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}{m.description ? ` — ${m.description}` : ''}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                className="w-full rounded border border-gray-600 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-blue-500 focus:outline-none"
+                value={local.llmModel}
+                onChange={e => setLocal(prev => ({ ...prev, llmModel: e.target.value }))}
+                placeholder="Enter model name (e.g. qwen3:32b)"
+              />
+            )
+          ) : activeModels.length > 0 ? (
             <select
               className="w-full rounded border border-gray-600 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-blue-500 focus:outline-none"
               value={local.llmModel}
               onChange={e => setLocal(prev => ({ ...prev, llmModel: e.target.value }))}
             >
-              {filteredModels.map(m => (
+              {activeModels.map(m => (
                 <option key={m.id} value={m.id}>{m.name}</option>
               ))}
             </select>
@@ -121,29 +235,12 @@ export function AgentConfigPanel({ config, onSave, onClose, availableSegmentatio
               className="w-full rounded border border-gray-600 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-blue-500 focus:outline-none"
               value={local.llmModel}
               onChange={e => setLocal(prev => ({ ...prev, llmModel: e.target.value }))}
-              placeholder="Enter model name (e.g. llama3.2)"
+              placeholder="Enter model name"
             />
           )}
         </div>
 
-        {/* API Key */}
-        {local.llmProvider !== 'ollama' && (
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-300">
-              API Key{' '}
-              <span className="text-gray-500">(stored locally)</span>
-            </label>
-            <input
-              type="password"
-              className="w-full rounded border border-gray-600 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-blue-500 focus:outline-none"
-              value={local.apiKey ?? ''}
-              onChange={e => setLocal(prev => ({ ...prev, apiKey: e.target.value }))}
-              placeholder="sk-..."
-            />
-          </div>
-        )}
-
-        {/* Segmentation Models */}
+        {/* Active Segmentation Model */}
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-300">
             Active Segmentation Model
@@ -159,11 +256,9 @@ export function AgentConfigPanel({ config, onSave, onClose, availableSegmentatio
           </select>
         </div>
 
-        {/* Registered segmentation models */}
+        {/* Segmentation model list */}
         <div>
-          <label className="mb-2 block text-xs font-medium text-gray-300">
-            Segmentation Models
-          </label>
+          <label className="mb-2 block text-xs font-medium text-gray-300">Segmentation Models</label>
           <div className="space-y-1">
             {local.segmentationModels.map(m => (
               <div
@@ -174,7 +269,7 @@ export function AgentConfigPanel({ config, onSave, onClose, availableSegmentatio
                   <span className="text-sm text-white">{m.name}</span>
                   <span className="ml-2 rounded bg-gray-700 px-1 text-xs text-gray-400">{m.type}</span>
                   {m.endpoint && (
-                    <div className="text-xs text-gray-500 truncate max-w-[160px]">{m.endpoint}</div>
+                    <div className="truncate max-w-[160px] text-xs text-gray-500">{m.endpoint}</div>
                   )}
                 </div>
                 {m.type === 'custom' && (
@@ -215,6 +310,7 @@ export function AgentConfigPanel({ config, onSave, onClose, availableSegmentatio
             </button>
           </div>
         </div>
+
       </div>
 
       <div className="flex gap-2 border-t border-gray-700 px-4 py-3">

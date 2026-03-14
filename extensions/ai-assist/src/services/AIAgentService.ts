@@ -193,14 +193,12 @@ interface SegmentationModelConfig {
   type: string;
 }
 
+// Static models for cloud providers only. Ollama models are fetched live from the backend.
 export const DEFAULT_LLM_MODELS: LLMModelOption[] = [
   { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', description: 'OpenAI GPT-4o' },
   { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai', description: 'OpenAI GPT-4o Mini (faster)' },
   { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', provider: 'anthropic', description: 'Anthropic Claude Opus 4.6' },
   { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', provider: 'anthropic', description: 'Anthropic Claude Sonnet 4.6' },
-  { id: 'qwen3:32b', name: 'Qwen3 32B', provider: 'ollama', description: 'Qwen3 32B via Ollama' },
-  { id: 'llama3.2', name: 'Llama 3.2', provider: 'ollama', description: 'Llama 3.2 via Ollama' },
-  { id: 'mistral', name: 'Mistral', provider: 'ollama', description: 'Mistral via Ollama' },
 ];
 
 export default AIAgentService;
