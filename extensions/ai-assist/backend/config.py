@@ -37,7 +37,8 @@ class Settings(BaseSettings):
     azure_openai_endpoint: str | None = None
     azure_openai_api_version: str = "2024-02-01"
 
-    # Ollama
+    # Ollama — set OLLAMA_BASE_URL to a remote server if needed
+    # e.g. https://maia-chat.app.cloud.cbh.kth.se/api
     ollama_base_url: str = "http://localhost:11434"
 
     # ── Segmentation ─────────────────────────────────────────────────────

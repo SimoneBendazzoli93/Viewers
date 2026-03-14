@@ -198,8 +198,9 @@ export const DEFAULT_LLM_MODELS: LLMModelOption[] = [
   { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai', description: 'OpenAI GPT-4o Mini (faster)' },
   { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', provider: 'anthropic', description: 'Anthropic Claude Opus 4.6' },
   { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', provider: 'anthropic', description: 'Anthropic Claude Sonnet 4.6' },
-  { id: 'llama3.2', name: 'Llama 3.2 (local)', provider: 'ollama', description: 'Local Llama via Ollama' },
-  { id: 'mistral', name: 'Mistral (local)', provider: 'ollama', description: 'Local Mistral via Ollama' },
+  { id: 'qwen3:32b', name: 'Qwen3 32B', provider: 'ollama', description: 'Qwen3 32B via Ollama' },
+  { id: 'llama3.2', name: 'Llama 3.2', provider: 'ollama', description: 'Llama 3.2 via Ollama' },
+  { id: 'mistral', name: 'Mistral', provider: 'ollama', description: 'Mistral via Ollama' },
 ];
 
 export default AIAgentService;
