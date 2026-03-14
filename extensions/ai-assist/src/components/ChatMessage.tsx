@@ -4,6 +4,10 @@ import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface Props {
   message: ChatMessageType;
+  /** When set, render this text as plain (no markdown) instead of message.content.
+   *  Used while the message is actively being streamed to avoid expensive
+   *  MarkdownRenderer re-parses on every token flush. */
+  overrideContent?: string;
 }
 
 function formatTime(date: Date): string {
@@ -13,7 +17,7 @@ function formatTime(date: Date): string {
 // React.memo: only re-render when the message prop reference changes.
 // prev.map() in the streaming handler returns the same object reference for
 // unchanged messages, so all non-streaming messages skip re-rendering entirely.
-export const ChatMessage = React.memo(function ChatMessage({ message }: Props) {
+export const ChatMessage = React.memo(function ChatMessage({ message, overrideContent }: Props) {
   const isUser = message.role === 'user';
   const isTool = message.role === 'tool';
 
@@ -82,6 +86,10 @@ export const ChatMessage = React.memo(function ChatMessage({ message }: Props) {
         )}
         {isUser ? (
           <div className="whitespace-pre-wrap text-sm">{message.content}</div>
+        ) : overrideContent !== undefined ? (
+          // Streaming in progress — render plain text to skip expensive markdown
+          // re-parsing on every token flush. Switches to MarkdownRenderer once done.
+          <div className="whitespace-pre-wrap text-sm leading-relaxed">{overrideContent}</div>
         ) : (
           <MarkdownRenderer content={message.content} />
         )}
