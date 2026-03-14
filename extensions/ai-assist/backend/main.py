@@ -54,6 +54,7 @@ class AgentRequestConfig(BaseModel):
     llm_model: str = Field(default="gpt-4o")
     segmentation_model: str = Field(default="totalsegmentator")
     api_key: Optional[str] = None
+    language: str = Field(default="English")
 
 
 class DicomSegInfo(BaseModel):
@@ -365,6 +366,7 @@ async def chat_stream(request: ChatRequest):
                 llm_model=request.config.llm_model,
                 segmentation_model=request.config.segmentation_model,
                 api_key=request.config.api_key,
+                language=request.config.language,
             ):
                 yield chunk
         except Exception as exc:

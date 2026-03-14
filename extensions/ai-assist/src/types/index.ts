@@ -24,6 +24,7 @@ export interface AgentConfig {
   activeSegmentationModel: string;
   apiKey?: string;
   chatHistoryStorage: ChatHistoryStorage;
+  language: string;
 }
 
 export type LLMProvider = 'openai' | 'anthropic' | 'ollama' | 'openrouter' | 'azure';

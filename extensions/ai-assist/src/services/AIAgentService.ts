@@ -20,6 +20,7 @@ const DEFAULT_CONFIG: AgentConfig = {
   ],
   activeSegmentationModel: 'totalsegmentator',
   chatHistoryStorage: 'localStorage',
+  language: 'English',
 } satisfies AgentConfig;
 
 const CONFIG_STORAGE_KEY = 'ohif-ai-assist-config';
@@ -80,6 +81,7 @@ export class AIAgentService {
         llm_model: this.config.llmModel,
         segmentation_model: this.config.activeSegmentationModel,
         api_key: this.config.apiKey,
+        language: this.config.language ?? 'English',
       },
     };
 

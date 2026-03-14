@@ -273,6 +273,24 @@ export function AgentConfigPanel({ config, onSave, onClose }: Props) {
           )}
         </div>
 
+        {/* Response Language */}
+        <div>
+          <label className="mb-1 block text-xs font-medium text-gray-300">Response Language</label>
+          <select
+            className="w-full rounded border border-gray-600 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-blue-500 focus:outline-none"
+            value={local.language ?? 'English'}
+            onChange={e => setLocal(prev => ({ ...prev, language: e.target.value }))}
+          >
+            <option value="English">English</option>
+            <option value="Swedish">Swedish</option>
+            <option value="Italian">Italian</option>
+            <option value="German">German</option>
+          </select>
+          <p className="mt-1 text-xs text-gray-500">
+            The agent will always reply in this language, regardless of the language used in your messages.
+          </p>
+        </div>
+
         {/* Chat History Storage */}
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-300">Chat History Storage</label>

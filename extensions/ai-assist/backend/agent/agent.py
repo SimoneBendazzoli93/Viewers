@@ -114,6 +114,7 @@ async def stream_agent_response(
     llm_model: str,
     segmentation_model: str,
     api_key: Optional[str] = None,
+    language: str = "English",
 ) -> AsyncIterator[str]:
     """
     Run the ReAct agent and yield Server-Sent Events (SSE) data strings.
@@ -137,7 +138,8 @@ async def stream_agent_response(
     agent = create_react_agent(llm, tools)
 
     # Build message history for the agent
-    lc_messages: list = [SystemMessage(content=SYSTEM_PROMPT)]
+    language_instruction = f"\n\n**Language requirement:** Always respond in {language}, regardless of the language used by the user."
+    lc_messages: list = [SystemMessage(content=SYSTEM_PROMPT + language_instruction)]
 
     for h in history:
         role = h.get("role", "")
