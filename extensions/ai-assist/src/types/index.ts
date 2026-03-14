@@ -8,6 +8,8 @@ export interface ChatMessage {
   toolResult?: string;
 }
 
+export type ChatHistoryStorage = 'localStorage' | 'sessionStorage' | 'none';
+
 export interface AgentConfig {
   backendUrl: string;
   llmProvider: LLMProvider;
@@ -15,6 +17,7 @@ export interface AgentConfig {
   segmentationModels: SegmentationModelConfig[];
   activeSegmentationModel: string;
   apiKey?: string;
+  chatHistoryStorage: ChatHistoryStorage;
 }
 
 export type LLMProvider = 'openai' | 'anthropic' | 'ollama' | 'openrouter' | 'azure';

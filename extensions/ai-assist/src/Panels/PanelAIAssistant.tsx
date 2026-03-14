@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useSystem } from '@ohif/core';
-import type { ChatMessage, AgentConfig, StreamMessage } from '../types';
+import type { ChatHistoryStorage, ChatMessage, AgentConfig, StreamMessage } from '../types';
 import { AIAgentService } from '../services/AIAgentService';
 import { ChatMessage as ChatMessageComponent } from '../components/ChatMessage';
 import { AgentConfigPanel } from '../components/AgentConfigPanel';
@@ -26,11 +26,18 @@ function storageKey(studyUID: string | null): string | null {
   return studyUID ? `ohif-ai-chat-${studyUID}` : null;
 }
 
-function loadHistory(studyUID: string | null): ChatMessage[] {
+function getStorage(type: ChatHistoryStorage): Storage | null {
+  if (type === 'localStorage') return window.localStorage;
+  if (type === 'sessionStorage') return window.sessionStorage;
+  return null;
+}
+
+function loadHistory(studyUID: string | null, storageType: ChatHistoryStorage): ChatMessage[] {
   const key = storageKey(studyUID);
-  if (!key) return [{ ...WELCOME_MESSAGE, timestamp: new Date() }];
+  const storage = key ? getStorage(storageType) : null;
+  if (!storage || !key) return [{ ...WELCOME_MESSAGE, timestamp: new Date() }];
   try {
-    const raw = localStorage.getItem(key);
+    const raw = storage.getItem(key);
     if (!raw) return [{ ...WELCOME_MESSAGE, timestamp: new Date() }];
     const parsed = JSON.parse(raw) as ChatMessage[];
     return parsed.map(m => ({ ...m, timestamp: new Date(m.timestamp) }));
@@ -39,14 +46,21 @@ function loadHistory(studyUID: string | null): ChatMessage[] {
   }
 }
 
-function saveHistory(studyUID: string | null, msgs: ChatMessage[]): void {
+function saveHistory(studyUID: string | null, msgs: ChatMessage[], storageType: ChatHistoryStorage): void {
   const key = storageKey(studyUID);
-  if (!key) return;
+  const storage = key ? getStorage(storageType) : null;
+  if (!storage || !key) return;
   try {
-    localStorage.setItem(key, JSON.stringify(msgs));
+    storage.setItem(key, JSON.stringify(msgs));
   } catch {
     // quota exceeded or private browsing — silently skip
   }
+}
+
+function clearHistory(studyUID: string | null, storageType: ChatHistoryStorage): void {
+  const key = storageKey(studyUID);
+  const storage = key ? getStorage(storageType) : null;
+  storage?.removeItem(key!);
 }
 
 function getActiveStudyUID(servicesManager: AppTypes.ServicesManager | undefined): string | null {
@@ -118,7 +132,10 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const [activeStudyUID, setActiveStudyUID] = useState<string | null>(() =>
     getActiveStudyUID(services)
   );
-  const [messages, setMessages] = useState<ChatMessage[]>(() => loadHistory(getActiveStudyUID(services)));
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const cfg = agentService.getConfig();
+    return loadHistory(getActiveStudyUID(services), cfg.chatHistoryStorage);
+  });
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
@@ -131,10 +148,10 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const activeStudyUIDRef = useRef<string | null>(activeStudyUID);
   activeStudyUIDRef.current = activeStudyUID;
 
-  // Persist messages to localStorage whenever they change
+  // Persist messages whenever they change
   useEffect(() => {
-    saveHistory(activeStudyUID, messages);
-  }, [messages, activeStudyUID]);
+    saveHistory(activeStudyUID, messages, config.chatHistoryStorage);
+  }, [messages, activeStudyUID, config.chatHistoryStorage]);
 
   // Watch for active study changes via viewport grid events
   useEffect(() => {
@@ -145,7 +162,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
       const newStudyUID = getActiveStudyUID(services);
       if (newStudyUID !== activeStudyUIDRef.current) {
         setActiveStudyUID(newStudyUID);
-        setMessages(loadHistory(newStudyUID));
+        setMessages(loadHistory(newStudyUID, agentService.getConfig().chatHistoryStorage));
       }
     };
 
@@ -327,8 +344,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   };
 
   const handleClearChat = () => {
-    const key = storageKey(activeStudyUID);
-    if (key) localStorage.removeItem(key);
+    clearHistory(activeStudyUID, config.chatHistoryStorage);
     setMessages([
       {
         id: nextId(),

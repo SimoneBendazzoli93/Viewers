@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import type { AgentConfig, LLMModelOption, LLMProvider, SegmentationModelConfig } from '../types';
+import type { AgentConfig, ChatHistoryStorage, LLMModelOption, LLMProvider, SegmentationModelConfig } from '../types';
 import { DEFAULT_LLM_MODELS } from '../services/AIAgentService';
 
 interface Props {
@@ -271,6 +271,23 @@ export function AgentConfigPanel({ config, onSave, onClose }: Props) {
               placeholder="Enter model name"
             />
           )}
+        </div>
+
+        {/* Chat History Storage */}
+        <div>
+          <label className="mb-1 block text-xs font-medium text-gray-300">Chat History Storage</label>
+          <select
+            className="w-full rounded border border-gray-600 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-blue-500 focus:outline-none"
+            value={local.chatHistoryStorage}
+            onChange={e => setLocal(prev => ({ ...prev, chatHistoryStorage: e.target.value as ChatHistoryStorage }))}
+          >
+            <option value="localStorage">localStorage — persists across sessions</option>
+            <option value="sessionStorage">sessionStorage — cleared on tab close</option>
+            <option value="none">None — in-memory only (not saved)</option>
+          </select>
+          <p className="mt-1 text-xs text-gray-500">
+            History is keyed per study, so each study has its own independent chat log.
+          </p>
         </div>
 
         {/* Active Segmentation Model */}

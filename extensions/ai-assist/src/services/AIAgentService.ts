@@ -19,7 +19,8 @@ const DEFAULT_CONFIG: AgentConfig = {
     },
   ],
   activeSegmentationModel: 'totalsegmentator',
-};
+  chatHistoryStorage: 'localStorage',
+} satisfies AgentConfig;
 
 const CONFIG_STORAGE_KEY = 'ohif-ai-assist-config';
 
