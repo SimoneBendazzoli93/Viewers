@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, startTransition } from 'react';
 import { useSystem } from '@ohif/core';
 import type { ChatHistoryStorage, ChatMessage, AgentConfig, StreamMessage, DicomWebContext } from '../types';
 import { AIAgentService } from '../services/AIAgentService';
@@ -201,6 +201,14 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const serverSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const browserSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Token-streaming buffer — incoming tokens are accumulated here and flushed
+  // to React state at most every STREAM_FLUSH_MS milliseconds via startTransition.
+  // This caps re-renders at ~20/sec regardless of LLM token rate.
+  const STREAM_FLUSH_MS = 50;
+  const streamBufferRef = useRef<string>('');
+  const streamMsgIdRef = useRef<string>('');    // which assistant msg the buffer belongs to
+  const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Always-current messages reference — used inside debounced server-save callbacks
   // so the timer closure never captures a stale snapshot of messages.
   const latestMessagesRef = useRef<ChatMessage[]>(messages);
@@ -347,12 +355,17 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
     const container = scrollContainerRef.current;
     if (!container) return;
     if (isLoadingMoreRef.current) {
-      // Pin the user's position: adjust scrollTop by however much the content grew.
       container.scrollTop = container.scrollHeight - prevScrollHeightRef.current;
       isLoadingMoreRef.current = false;
       return;
     }
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Only auto-scroll when the user is already near the bottom (within 150 px).
+    // This prevents fighting the user if they scroll up to read during a long stream.
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distanceFromBottom < 150) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages, displayCount]);
 
   // Load an older page of messages when the user scrolls close to the top.
@@ -452,7 +465,12 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
           break;
 
         case 'final':
-          // Replace assistant message with final answer
+          // Discard any buffered tokens — the final content supersedes them.
+          if (streamFlushTimerRef.current) {
+            clearTimeout(streamFlushTimerRef.current);
+            streamFlushTimerRef.current = null;
+          }
+          streamBufferRef.current = '';
           setMessages(prev =>
             prev.map(m =>
               m.id === assistantMsgId ? { ...m, content: event.content } : m
@@ -546,15 +564,29 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
 
         case 'observation':
         default:
-          // Append incremental text
+          // Buffer the token and flush to React state at most every STREAM_FLUSH_MS.
+          // startTransition marks the update as non-urgent so user input (typing,
+          // clicking) stays responsive even during a high-throughput LLM stream.
           if (event.content) {
-            setMessages(prev =>
-              prev.map(m =>
-                m.id === assistantMsgId
-                  ? { ...m, content: m.content + event.content }
-                  : m
-              )
-            );
+            streamBufferRef.current += event.content;
+            streamMsgIdRef.current = assistantMsgId;
+            if (!streamFlushTimerRef.current) {
+              streamFlushTimerRef.current = setTimeout(() => {
+                streamFlushTimerRef.current = null;
+                const text = streamBufferRef.current;
+                const msgId = streamMsgIdRef.current;
+                streamBufferRef.current = '';
+                if (text && msgId) {
+                  startTransition(() => {
+                    setMessages(prev =>
+                      prev.map(m =>
+                        m.id === msgId ? { ...m, content: m.content + text } : m
+                      )
+                    );
+                  });
+                }
+              }, STREAM_FLUSH_MS);
+            }
           }
           break;
       }
@@ -593,6 +625,12 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   };
 
   const handleCancel = () => {
+    // Discard any buffered tokens so they don't appear after cancellation
+    if (streamFlushTimerRef.current) {
+      clearTimeout(streamFlushTimerRef.current);
+      streamFlushTimerRef.current = null;
+    }
+    streamBufferRef.current = '';
     agentService.cancelCurrentRequest();
     setIsStreaming(false);
   };

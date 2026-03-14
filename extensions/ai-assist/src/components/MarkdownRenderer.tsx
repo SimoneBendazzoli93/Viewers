@@ -334,7 +334,10 @@ function splitCodeFences(content: string): Array<
 
 // ── Public component ──────────────────────────────────────────────────────────
 
-export function MarkdownRenderer({ content }: { content: string }) {
+// React.memo: content only changes for the actively-streaming message.
+// All other assistant messages share the same content reference between renders
+// and skip re-parsing the markdown entirely.
+export const MarkdownRenderer = React.memo(function MarkdownRenderer({ content }: { content: string }) {
   const segments = splitCodeFences(content);
 
   return (
@@ -348,6 +351,6 @@ export function MarkdownRenderer({ content }: { content: string }) {
       )}
     </div>
   );
-}
+});
 
 export default MarkdownRenderer;

@@ -10,7 +10,10 @@ function formatTime(date: Date): string {
   return new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit' }).format(date);
 }
 
-export function ChatMessage({ message }: Props) {
+// React.memo: only re-render when the message prop reference changes.
+// prev.map() in the streaming handler returns the same object reference for
+// unchanged messages, so all non-streaming messages skip re-rendering entirely.
+export const ChatMessage = React.memo(function ChatMessage({ message }: Props) {
   const isUser = message.role === 'user';
   const isTool = message.role === 'tool';
 
@@ -93,5 +96,7 @@ export function ChatMessage({ message }: Props) {
     </div>
   );
 }
+
+});
 
 export default ChatMessage;
