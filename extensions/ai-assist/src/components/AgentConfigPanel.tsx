@@ -232,30 +232,17 @@ export function AgentConfigPanel({ config, onSave, onClose }: Props) {
                 />
               </div>
             ) : ollamaModels.length > 0 ? (
-              <div className="max-h-48 overflow-y-auto rounded border border-gray-600 bg-gray-800">
-                {ollamaModels.map(m => {
-                  const selected = local.llmModel === m.id;
-                  return (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => setLocal(prev => ({ ...prev, llmModel: m.id }))}
-                      className={`w-full px-3 py-2 text-left text-sm transition-colors ${
-                        selected
-                          ? 'bg-blue-600 text-white'
-                          : 'text-gray-200 hover:bg-gray-700'
-                      }`}
-                    >
-                      <span className="font-medium">{m.name}</span>
-                      {m.description && (
-                        <span className={`ml-2 text-xs ${selected ? 'text-blue-200' : 'text-gray-500'}`}>
-                          {m.description}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+              <select
+                className="w-full rounded border border-gray-600 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-blue-500 focus:outline-none"
+                value={local.llmModel}
+                onChange={e => setLocal(prev => ({ ...prev, llmModel: e.target.value }))}
+              >
+                {ollamaModels.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}{m.description ? ` — ${m.description}` : ''}
+                  </option>
+                ))}
+              </select>
             ) : (
               <input
                 type="text"
