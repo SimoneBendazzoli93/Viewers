@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from config import settings
 from agent import stream_agent_response
-
+from pathlib import Path
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,

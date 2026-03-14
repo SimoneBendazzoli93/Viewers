@@ -37,6 +37,13 @@ const QUICK_ACTIONS: QuickAction[] = [
     prompt: 'Describe the current DICOM study, patient information, and notable findings.',
     description: 'Describe study findings',
   },
+  {
+    id: 'analyze_segmentation',
+    label: 'Analyze Segmentation',
+    icon: '🔍',
+    prompt: 'Analyze the segmentation mask.',
+    description: 'Analyze segmentation masks',
+  },
 ];
 
 interface Props {
@@ -46,14 +53,14 @@ interface Props {
 
 export function QuickActionBar({ onAction, disabled }: Props) {
   return (
-    <div className="flex flex-wrap gap-1 px-2 py-2 border-t border-gray-700">
+    <div className="flex flex-wrap gap-1 border-t border-gray-700 px-2 py-2">
       {QUICK_ACTIONS.map(action => (
         <button
           key={action.id}
           onClick={() => onAction(action.prompt)}
           disabled={disabled}
           title={action.description}
-          className="flex items-center gap-1 rounded border border-gray-600 bg-gray-800 px-2 py-1 text-xs text-gray-300 hover:border-blue-500 hover:bg-gray-700 hover:text-white disabled:opacity-40 transition-colors"
+          className="flex items-center gap-1 rounded border border-gray-600 bg-gray-800 px-2 py-1 text-xs text-gray-300 transition-colors hover:border-blue-500 hover:bg-gray-700 hover:text-white disabled:opacity-40"
         >
           <span>{action.icon}</span>
           <span>{action.label}</span>

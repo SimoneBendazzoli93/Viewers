@@ -14,7 +14,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Optional
-
+from scipy.ndimage.measurements import label as scipy_label
 import numpy as np
 import pydicom
 from langchain_core.tools import tool
@@ -292,10 +292,18 @@ def convert_dicom_seg_to_nifti(
     try:
         masks = convert_seg_file_to_nifti(seg_file, output_dir)
         volumes_ml = {}
+        connected_components = {}
         for label, path in masks.items():
             mask = sitk.ReadImage(path)
             volume = mask.GetSpacing()[0] * mask.GetSpacing()[1] * mask.GetSpacing()[2] * np.sum(sitk.GetArrayFromImage(mask)) / 1000.0
             volumes_ml[label] = volume
+            structure = np.ones((3, 3, 3), dtype=np.int32)
+            labeled_array, num_features = scipy_label(sitk.GetArrayFromImage(mask), structure)
+            connected_components[label] = {"total": num_features}
+            for i in range(1, num_features + 1):
+                connected_components[label][f"component_{i}_size_voxels"] = int(np.sum(labeled_array == i))
+                connected_components[label][f"component_{i}_size_ml"] = int(connected_components[label][f"component_{i}_size_voxels"] * mask.GetSpacing()[0] * mask.GetSpacing()[1] * mask.GetSpacing()[2] / 1000.0)
+
     except Exception as exc:
         logger.exception("DICOM SEG conversion error")
         return json.dumps({"error": f"Conversion failed: {exc}"})
@@ -309,6 +317,7 @@ def convert_dicom_seg_to_nifti(
         "segments": {label: path for label, path in masks.items()},
         "num_segments": len(masks),
         "volumes_ml": volumes_ml,
+        "connected_components": connected_components,
         "message": (
             f"Converted {len(masks)} segment(s): {', '.join(masks.keys())}. "
             "Pass the mask path(s) to extract_radiomics."
