@@ -59,10 +59,11 @@ When given a task, follow these priorities:
 - Always compile the report AFTER collecting all available data.
 - Be precise with UIDs and parameters.
 - If something fails, explain the error clearly and suggest alternatives.
-- The `dicomweb_url` parameter in every tool is **optional**. If it is present
-  in the study context, pass it through. If it is absent, omit it entirely —
-  the server will use its configured ``DICOMWEB_URL`` automatically. Never ask
-  the user for a DICOMweb URL.
+- The `dicomweb_url` parameter in every tool maps to the WADO-RS retrieve
+  endpoint (`wadoRoot` in the study context). It is **optional** — when omitted
+  the server falls back to its configured `DICOMWEB_WADO_ROOT` env var.
+  Never ask the user for a DICOMweb URL; always use `wadoRoot` from the study
+  context (or omit the parameter entirely if absent).
 
 Current study context will be provided in the user message when available.
 The `availableSegmentations` field lists DICOM SEG series already loaded in the viewer.
@@ -123,17 +124,50 @@ async def stream_agent_response(
             lc_messages.append(AIMessage(content=content))
 
     # Append study context to the user message.
-    # If the frontend did not supply a dicomwebUrl but DICOMWEB_URL is set in
-    # the environment, inject it here so the LLM sees it in context and never
-    # needs to ask the user for it.
+    # Fill in DICOMweb fields from environment variables when the frontend did
+    # not supply them (e.g. scripted / API usage without a live OHIF session).
+    # wadoRoot is what the LLM should pass as dicomweb_url to the tools.
     user_content = message
     if study_context:
-        if not study_context.get("dicomwebUrl") and settings.dicomweb_url:
-            study_context = {**study_context, "dicomwebUrl": settings.dicomweb_url}
-        ctx_lines = "\n".join(f"  {k}: {v}" for k, v in study_context.items() if v)
+        effective_wado = (
+            study_context.get("wadoRoot")
+            or study_context.get("dicomwebUrl")
+            or settings.dicomweb_wado_root
+            or settings.dicomweb_url
+        )
+        effective_qido = (
+            study_context.get("qidoRoot")
+            or settings.dicomweb_qido_root
+            or settings.dicomweb_url
+            or effective_wado
+        )
+        patches: dict = {}
+        if effective_wado and not study_context.get("wadoRoot"):
+            patches["wadoRoot"] = effective_wado
+        if effective_qido and not study_context.get("qidoRoot"):
+            patches["qidoRoot"] = effective_qido
+        if settings.dicomweb_static_wado and study_context.get("staticWado") is None:
+            patches["staticWado"] = settings.dicomweb_static_wado
+        if settings.dicomweb_singlepart and not study_context.get("singlepart"):
+            patches["singlepart"] = settings.dicomweb_singlepart
+        if patches:
+            study_context = {**study_context, **patches}
+
+        ctx_lines = "\n".join(f"  {k}: {v}" for k, v in study_context.items() if v is not None and v != "")
         user_content = f"{message}\n\n[Current Study Context]\n{ctx_lines}"
-    elif settings.dicomweb_url:
-        user_content = f"{message}\n\n[Current Study Context]\n  dicomwebUrl: {settings.dicomweb_url}"
+    else:
+        # No study context from the frontend — build a minimal one from env vars.
+        wado = settings.dicomweb_wado_root or settings.dicomweb_url
+        qido = settings.dicomweb_qido_root or settings.dicomweb_url or wado
+        if wado:
+            ctx_parts = [f"  wadoRoot: {wado}"]
+            if qido and qido != wado:
+                ctx_parts.append(f"  qidoRoot: {qido}")
+            if settings.dicomweb_static_wado:
+                ctx_parts.append(f"  staticWado: true")
+            if settings.dicomweb_singlepart:
+                ctx_parts.append(f"  singlepart: {settings.dicomweb_singlepart}")
+            user_content = f"{message}\n\n[Current Study Context]\n" + "\n".join(ctx_parts)
 
     lc_messages.append(HumanMessage(content=user_content))
 

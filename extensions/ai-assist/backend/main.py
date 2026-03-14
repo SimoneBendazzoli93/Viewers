@@ -69,7 +69,16 @@ class StudyContext(BaseModel):
     patientName: Optional[str] = None
     studyDate: Optional[str] = None
     modality: Optional[str] = None
-    dicomwebUrl: Optional[str] = None
+
+    # DICOMweb configuration — mirrors the OHIF data source configuration.
+    # The viewer populates these from extensionManager.getActiveDataSource()[0].getConfig().
+    dicomwebUrl: Optional[str] = None      # legacy single-URL field (backward compat)
+    wadoRoot: Optional[str] = None         # WADO-RS base URL for retrieve operations
+    qidoRoot: Optional[str] = None         # QIDO-RS base URL for search operations
+    wadoUriRoot: Optional[str] = None      # WADO-URI base URL
+    staticWado: Optional[bool] = None      # server serves static (pre-generated) files
+    singlepart: Optional[str] = None       # comma-sep modalities: "bulkdata,video"
+
     availableSegmentations: Optional[list[DicomSegInfo]] = None
 
 

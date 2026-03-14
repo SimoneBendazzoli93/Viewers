@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useSystem } from '@ohif/core';
-import type { ChatHistoryStorage, ChatMessage, AgentConfig, StreamMessage } from '../types';
+import type { ChatHistoryStorage, ChatMessage, AgentConfig, StreamMessage, DicomWebContext } from '../types';
 import { AIAgentService } from '../services/AIAgentService';
 import { ChatMessage as ChatMessageComponent } from '../components/ChatMessage';
 import { AgentConfigPanel } from '../components/AgentConfigPanel';
@@ -78,7 +78,38 @@ function getActiveStudyUID(servicesManager: AppTypes.ServicesManager | undefined
   }
 }
 
-function buildStudyContext(servicesManager: AppTypes.ServicesManager) {
+/**
+ * Extract DICOMweb configuration from the active OHIF data source.
+ * Returns null if the extension manager or data source is unavailable.
+ */
+function getDicomWebContext(extensionManager: AppTypes.ExtensionManager | undefined): DicomWebContext | null {
+  try {
+    if (!extensionManager) return null;
+    const [dataSource] = extensionManager.getActiveDataSource?.() ?? [];
+    if (!dataSource) return null;
+    const cfg = dataSource.getConfig?.() ?? {};
+
+    const ctx: DicomWebContext = {};
+    if (cfg.wadoRoot) ctx.wadoRoot = cfg.wadoRoot;
+    if (cfg.qidoRoot) ctx.qidoRoot = cfg.qidoRoot;
+    if (cfg.wadoUriRoot) ctx.wadoUriRoot = cfg.wadoUriRoot;
+    if (cfg.staticWado != null) ctx.staticWado = Boolean(cfg.staticWado);
+    // singlepart can be a boolean or a comma-separated string in OHIF config
+    if (cfg.singlepart != null) {
+      ctx.singlepart = typeof cfg.singlepart === 'string' ? cfg.singlepart : String(cfg.singlepart);
+    }
+    // Return null if we couldn't extract any useful URL
+    if (!ctx.wadoRoot && !ctx.qidoRoot) return null;
+    return ctx;
+  } catch {
+    return null;
+  }
+}
+
+function buildStudyContext(
+  servicesManager: AppTypes.ServicesManager,
+  extensionManager?: AppTypes.ExtensionManager
+) {
   try {
     const { viewportGridService, displaySetService } = servicesManager.services;
     const { activeViewportId, viewports } = viewportGridService.getState();
@@ -106,6 +137,9 @@ function buildStudyContext(servicesManager: AppTypes.ServicesManager) {
         referencedSeriesInstanceUID: ds.referencedSeriesInstanceUID ?? ds.ReferencedSeriesInstanceUID ?? '',
       }));
 
+    // DICOMweb configuration from the active data source
+    const dicomWebCtx = getDicomWebContext(extensionManager);
+
     return {
       studyInstanceUID: studyUID,
       seriesInstanceUID: displaySet.SeriesInstanceUID,
@@ -113,6 +147,8 @@ function buildStudyContext(servicesManager: AppTypes.ServicesManager) {
       patientName: displaySet.PatientName,
       studyDate: displaySet.StudyDate,
       modality: displaySet.Modality,
+      // Spread DICOMweb fields at the top level — mirrors backend StudyContext model
+      ...dicomWebCtx,
       availableSegmentations: availableSegmentations.length > 0 ? availableSegmentations : undefined,
     };
   } catch {
@@ -128,6 +164,7 @@ interface Props {
 export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const system = useSystem();
   const services = servicesManager ?? system?.servicesManager;
+  const extensionManager = system?.extensionManager;
 
   const [activeStudyUID, setActiveStudyUID] = useState<string | null>(() =>
     getActiveStudyUID(services)
@@ -303,7 +340,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
       setMessages(prev => [...prev, userMsg]);
       setIsStreaming(true);
 
-      const studyContext = services ? buildStudyContext(services) : null;
+      const studyContext = services ? buildStudyContext(services, extensionManager) : null;
 
       // Create a placeholder for the assistant response
       const assistantMsgId = nextId();

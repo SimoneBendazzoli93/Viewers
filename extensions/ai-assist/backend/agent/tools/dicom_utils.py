@@ -3,8 +3,7 @@ Utility functions for fetching and handling DICOM data from a DICOMweb server.
 """
 from __future__ import annotations
 
-import os
-import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -14,20 +13,100 @@ from dicomweb_client.api import DICOMwebClient
 from config import settings
 
 
-def resolve_dicomweb_url(provided: str | None) -> str:
-    """
-    Return *provided* if non-empty, otherwise fall back to the server-level
-    ``DICOMWEB_URL`` environment variable.  Raises ``ValueError`` if neither
-    is available so callers get a clear error instead of a silent None.
-    """
-    url = provided or settings.dicomweb_url
-    if not url:
-        raise ValueError(
-            "No DICOMweb URL available. Either pass dicomweb_url explicitly "
-            "or set DICOMWEB_URL in the backend environment."
-        )
-    return url
+# ── DICOMweb configuration dataclass ─────────────────────────────────────────
 
+@dataclass
+class DicomWebConfig:
+    """
+    Resolved DICOMweb endpoint configuration.
+
+    Mirrors the OHIF data source configuration fields so values can be
+    copied directly from appConfig.js / default.js.
+    """
+    wado_root: str                              # WADO-RS base URL (retrieve)
+    qido_root: str = ""                         # QIDO-RS base URL (search)
+    wado_uri_root: str = ""                     # WADO-URI base URL
+    static_wado: bool = False                   # server serves static files
+    singlepart: list[str] = field(default_factory=list)  # e.g. ["bulkdata", "video"]
+    omit_quotation_for_multipart: bool = True   # content-negotiation tweak
+    auth_token: Optional[str] = None
+
+
+def resolve_dicomweb_config(
+    provided_wado_root: str | None = None,
+    provided_url: str | None = None,
+) -> DicomWebConfig:
+    """
+    Build a :class:`DicomWebConfig` from the provided values, falling back to
+    environment variables.
+
+    Resolution order for the WADO-RS root:
+      1. *provided_wado_root*  (``wadoRoot`` from the study context)
+      2. *provided_url*        (``dicomwebUrl`` from the study context, legacy)
+      3. ``DICOMWEB_WADO_ROOT`` env var
+      4. ``DICOMWEB_URL`` env var (backward-compat shortcut)
+
+    Raises ``ValueError`` if no URL can be determined.
+    """
+    wado_root = (
+        provided_wado_root
+        or provided_url
+        or settings.dicomweb_wado_root
+        or settings.dicomweb_url
+    )
+    if not wado_root:
+        raise ValueError(
+            "No DICOMweb WADO-RS URL available. "
+            "Pass wadoRoot / dicomweb_url explicitly or set DICOMWEB_WADO_ROOT "
+            "(or DICOMWEB_URL) in the backend environment."
+        )
+
+    qido_root = settings.dicomweb_qido_root or settings.dicomweb_url or wado_root
+    wado_uri_root = settings.dicomweb_wado_uri_root or settings.dicomweb_url or wado_root
+
+    singlepart: list[str] = []
+    if settings.dicomweb_singlepart:
+        singlepart = [s.strip() for s in settings.dicomweb_singlepart.split(",") if s.strip()]
+
+    return DicomWebConfig(
+        wado_root=wado_root,
+        qido_root=qido_root,
+        wado_uri_root=wado_uri_root,
+        static_wado=settings.dicomweb_static_wado,
+        singlepart=singlepart,
+        omit_quotation_for_multipart=settings.dicomweb_omit_quotation_for_multipart,
+    )
+
+
+# Thin wrapper kept for backward compatibility with callers that just need a URL string.
+def resolve_dicomweb_url(provided: str | None) -> str:
+    """Return the WADO-RS root URL, raising ValueError if unavailable."""
+    cfg = resolve_dicomweb_config(provided_wado_root=provided)
+    return cfg.wado_root
+
+
+# ── DICOMwebClient factory ────────────────────────────────────────────────────
+
+def _build_client(cfg: DicomWebConfig) -> DICOMwebClient:
+    """
+    Build a :class:`DICOMwebClient` configured from a :class:`DicomWebConfig`.
+
+    Applies content-type tweaks for static WADO servers and singlepart support.
+    """
+    headers: dict[str, str] = {}
+    if cfg.auth_token:
+        headers["Authorization"] = f"Bearer {cfg.auth_token}"
+
+    # For static WADO servers the Accept header must be permissive; the server
+    # won't do content negotiation, it just serves pre-generated files.
+    if cfg.static_wado:
+        headers.setdefault("Accept", "multipart/related; type=\"application/octet-stream\", */*")
+
+    client = DICOMwebClient(url=cfg.wado_root, headers=headers)
+    return client
+
+
+# ── Public helpers ────────────────────────────────────────────────────────────
 
 def fetch_series_to_dir(
     dicomweb_url: str,
@@ -39,12 +118,13 @@ def fetch_series_to_dir(
     """
     Fetch all instances for a series from a DICOMweb WADO-RS endpoint.
     Returns a list of saved DICOM file paths.
-    """
-    headers = {}
-    if auth_token:
-        headers["Authorization"] = f"Bearer {auth_token}"
 
-    client = DICOMwebClient(url=dicomweb_url, headers=headers)
+    *dicomweb_url* is the WADO-RS base URL (``wadoRoot``).
+    """
+    cfg = resolve_dicomweb_config(provided_wado_root=dicomweb_url)
+    cfg.auth_token = auth_token
+    client = _build_client(cfg)
+
     instances = client.retrieve_series(
         study_instance_uid=study_uid,
         series_instance_uid=series_uid,
@@ -65,12 +145,12 @@ def get_study_metadata(
     study_uid: str,
     auth_token: Optional[str] = None,
 ) -> dict:
-    """Return study-level metadata as a dict."""
-    headers = {}
-    if auth_token:
-        headers["Authorization"] = f"Bearer {auth_token}"
+    """Return study-level metadata as a dict (uses QIDO-RS search)."""
+    cfg = resolve_dicomweb_config(provided_wado_root=dicomweb_url)
+    cfg.auth_token = auth_token
+    # For metadata / search use the QIDO root
+    client = DICOMwebClient(url=cfg.qido_root, headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {})
 
-    client = DICOMwebClient(url=dicomweb_url, headers=headers)
     series_list = client.search_for_series(study_instance_uid=study_uid)
     return {
         "study_instance_uid": study_uid,

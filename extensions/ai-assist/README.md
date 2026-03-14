@@ -160,7 +160,12 @@ The default is `/tmp/ohif-ai-chat-history`. The directory is created automatical
 | `DEFAULT_LLM_PROVIDER`        | `openai`                       | Default LLM provider                            |
 | `DEFAULT_LLM_MODEL`           | `gpt-4o`                       | Default model name                              |
 | `DEFAULT_SEGMENTATION_MODEL`  | `totalsegmentator`             | Active segmentation model                       |
-| `DICOMWEB_URL`                | —                              | Default DICOMweb WADO-RS base URL (see below)   |
+| `DICOMWEB_WADO_ROOT`          | —                              | WADO-RS retrieve URL (see DICOMweb section)     |
+| `DICOMWEB_QIDO_ROOT`          | —                              | QIDO-RS search URL                              |
+| `DICOMWEB_WADO_URI_ROOT`      | —                              | WADO-URI base URL                               |
+| `DICOMWEB_STATIC_WADO`        | `false`                        | Set `true` for static / S3 servers              |
+| `DICOMWEB_SINGLEPART`         | —                              | e.g. `bulkdata,video`                           |
+| `DICOMWEB_URL`                | —                              | Shortcut: sets all three roots to the same URL  |
 | `CUSTOM_SEG_ENDPOINTS`        | —                              | `id:url` pairs, comma-separated                 |
 | `TOTALSEGMENTATOR_TASK`       | `total`                        | TotalSegmentator task                           |
 | `TOTALSEGMENTATOR_FAST`       | `false`                        | Use fast mode for TotalSegmentator              |
@@ -168,25 +173,50 @@ The default is `/tmp/ohif-ai-chat-history`. The directory is created automatical
 | `PORT`                        | `8000`                         | Backend server port                             |
 | `DEBUG`                       | `false`                        | Enable debug logging                            |
 
-### DICOMweb URL
+### DICOMweb Configuration
 
-The agent needs a DICOMweb WADO-RS base URL to fetch DICOM series for segmentation and radiomics. There are two ways to supply it:
+The agent needs DICOMweb endpoints to fetch DICOM series for segmentation and radiomics. The configuration mirrors the **OHIF data source configuration** exactly, so you can copy values straight from your `appConfig.js` / `default.js`.
+
+#### How the URL is supplied
 
 | Source | When it applies |
 |--------|-----------------|
-| **OHIF viewer** (automatic) | When you open a study in the browser the viewer sends `dicomwebUrl` in every chat request. No configuration needed. |
-| **`DICOMWEB_URL` env var** | Fallback for scripted / API usage where no viewer context is available, or to override what the viewer sends. |
+| **OHIF viewer** (automatic) | The viewer reads `extensionManager.getActiveDataSource()[0].getConfig()` and sends `wadoRoot`, `qidoRoot`, `staticWado`, `singlepart` in every chat request. No backend configuration needed for normal browser usage. |
+| **Environment variables** | Fallback for scripted / API usage without a live OHIF session, or to override what the viewer sends. |
+
+#### Environment variables
+
+The env var names map 1-to-1 to the OHIF data source configuration fields:
+
+| Env var | OHIF field | Description |
+|---------|-----------|-------------|
+| `DICOMWEB_WADO_ROOT` | `configuration.wadoRoot` | WADO-RS base URL — used by all retrieve tools |
+| `DICOMWEB_QIDO_ROOT` | `configuration.qidoRoot` | QIDO-RS base URL — used for metadata search |
+| `DICOMWEB_WADO_URI_ROOT` | `configuration.wadoUriRoot` | WADO-URI base URL |
+| `DICOMWEB_STATIC_WADO` | `configuration.staticWado` | `true` for static/S3 servers |
+| `DICOMWEB_SINGLEPART` | `configuration.singlepart` | `"bulkdata,video"` etc. |
+| `DICOMWEB_URL` | — | Backward-compat shortcut: sets all three roots to the same URL |
+
+#### Examples
 
 ```bash
-# .env
-DICOMWEB_URL=http://orthanc:8042/wado
-# or for dcm4chee:
-DICOMWEB_URL=http://localhost:8080/dcm4chee-arc/aets/DCM4CHEE/rs
+# AWS S3 / CloudFront static WADO (copy from the appConfig.js example above)
+DICOMWEB_WADO_ROOT=https://d14fa38qiwhyfd.cloudfront.net/dicomweb
+DICOMWEB_QIDO_ROOT=https://d14fa38qiwhyfd.cloudfront.net/dicomweb
+DICOMWEB_WADO_URI_ROOT=https://d14fa38qiwhyfd.cloudfront.net/dicomweb
+DICOMWEB_STATIC_WADO=true
+DICOMWEB_SINGLEPART=bulkdata,video
+
+# Orthanc (simple)
+DICOMWEB_WADO_ROOT=http://orthanc:8042/wado
+DICOMWEB_QIDO_ROOT=http://orthanc:8042/wado
+
+# dcm4chee
+DICOMWEB_WADO_ROOT=http://localhost:8080/dcm4chee-arc/aets/DCM4CHEE/rs
+DICOMWEB_QIDO_ROOT=http://localhost:8080/dcm4chee-arc/aets/DCM4CHEE/rs
 ```
 
-When `DICOMWEB_URL` is set:
-- It is injected into the study context the agent sees, so the agent never asks the user for it.
-- All tools (`run_totalsegmentator`, `run_nnunet`, `run_custom_segmentation`, `convert_dicom_seg_to_nifti`, `extract_radiomics`) accept the URL as an optional parameter and fall back to this env var when it is omitted.
+When the env vars are set, they are injected into the study context the agent sees, so the agent never asks the user for a DICOMweb URL. All tools (`run_totalsegmentator`, `run_nnunet`, `run_custom_segmentation`, `convert_dicom_seg_to_nifti`, `extract_radiomics`) accept the URL as an optional parameter and fall back to these env vars when it is omitted.
 
 ---
 

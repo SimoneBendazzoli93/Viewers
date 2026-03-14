@@ -46,12 +46,29 @@ class Settings(BaseSettings):
     ollama_api_key: str | None = None
 
     # ── DICOMweb ──────────────────────────────────────────────────────────
-    # Default DICOMweb WADO-RS base URL used when the OHIF viewer does not
-    # send one in the study context (e.g. for programmatic / scripted usage).
-    # When set, tools that require a DICOMweb URL will use it automatically
-    # and the agent will never need to ask the user for it.
-    # Example: http://orthanc:8042/wado   or   http://localhost:8080/dcm4chee-arc/aets/DCM4CHEE/rs
-    dicomweb_url: str | None = None
+    # These mirror the OHIF data source configuration fields exactly so you
+    # can copy-paste the values from your appConfig.js / default.js.
+    # The OHIF viewer also sends them in every chat request (via the study
+    # context), so these env vars are only needed for scripted / API usage
+    # or to override what the viewer sends.
+    #
+    # Field mapping vs OHIF data source configuration:
+    #   DICOMWEB_WADO_ROOT  ↔  configuration.wadoRoot   (WADO-RS retrieve)
+    #   DICOMWEB_QIDO_ROOT  ↔  configuration.qidoRoot   (QIDO-RS search)
+    #   DICOMWEB_WADO_URI_ROOT ↔ configuration.wadoUriRoot
+    #   DICOMWEB_STATIC_WADO   ↔ configuration.staticWado
+    #   DICOMWEB_SINGLEPART    ↔ configuration.singlepart
+    #
+    # Backward-compat shortcut: set DICOMWEB_URL to use the same URL for
+    # all three roots (WADO-RS, QIDO-RS, WADO-URI).  The specific vars
+    # take precedence over DICOMWEB_URL when both are set.
+    dicomweb_url: str | None = None            # shortcut → all three roots
+    dicomweb_wado_root: str | None = None      # WADO-RS base URL (retrieve)
+    dicomweb_qido_root: str | None = None      # QIDO-RS base URL (search)
+    dicomweb_wado_uri_root: str | None = None  # WADO-URI base URL
+    dicomweb_static_wado: bool = False         # server serves static files
+    dicomweb_singlepart: str = ""              # comma-sep list: "bulkdata,video"
+    dicomweb_omit_quotation_for_multipart: bool = True  # content-negotiation
 
     # ── Segmentation ─────────────────────────────────────────────────────
     default_segmentation_model: str = "totalsegmentator"

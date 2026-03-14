@@ -38,6 +38,19 @@ export interface LLMModelOption {
   description?: string;
 }
 
+/**
+ * DICOMweb endpoint configuration extracted from the active OHIF data source.
+ * Field names match the OHIF data source configuration object exactly so values
+ * can be forwarded to the backend without transformation.
+ */
+export interface DicomWebContext {
+  wadoRoot?: string;       // WADO-RS base URL — used by tools as dicomweb_url
+  qidoRoot?: string;       // QIDO-RS base URL
+  wadoUriRoot?: string;    // WADO-URI base URL
+  staticWado?: boolean;    // server serves pre-generated static files
+  singlepart?: string;     // comma-sep modalities: "bulkdata,video"
+}
+
 export interface DicomSegInfo {
   seriesInstanceUID: string;
   seriesDescription?: string;
