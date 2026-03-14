@@ -21,7 +21,7 @@ from langchain_core.tools import tool
 
 from config import settings
 from .dicom_utils import fetch_series_to_dir, resolve_dicomweb_url
-
+import SimpleITK as sitk
 logger = logging.getLogger(__name__)
 
 
@@ -166,29 +166,71 @@ def convert_seg_file_to_nifti(seg_dcm_path: Path, output_dir: Path) -> dict[str,
         seg = hd.seg.segread(str(seg_dcm_path))
         results: dict[str, str] = {}
 
+        source_uids = [uids[2] for uids in seg.get_source_image_uids()]
+
         for seg_num in seg.segment_numbers:
             desc = seg.get_segment_description(seg_num)
             label = desc.segment_label or f"Segment_{seg_num}"
 
             # get_pixels_by_segment returns (frames, rows, cols, 1) for binary segs
             try:
-                arr = seg.get_pixels_by_segment(segment_numbers=[seg_num])
-                # Shape is (frames, rows, cols, n_segments); squeeze last dim
+                # 2. Reconstruct the full pixel array for this specific segment
+                arr = seg.get_pixels_by_source_instance(
+                    source_sop_instance_uids=source_uids,
+                    segment_numbers=[seg_num],
+                    ignore_spatial_locations=True # Useful if you are just looking to extract the raw mask stack
+                )
                 mask = arr[..., 0].astype(np.uint8)
             except Exception as exc:
-                logger.warning("highdicom get_pixels_by_segment failed for seg %d: %s", seg_num, exc)
+                logger.warning("highdicom get_pixels_by_source_instance failed for seg %d: %s", seg_num, exc)
                 continue
 
             mask_img = sitk.GetImageFromArray(mask)
-            # highdicom does not auto-set geometry on the array; use shared metadata
-            shared = seg.SharedFunctionalGroupsSequence[0] if seg.SharedFunctionalGroupsSequence else None
-            if shared:
-                pix_meas = getattr(shared, "PixelMeasuresSequence", None)
-                if pix_meas:
-                    ps = [float(v) for v in pix_meas[0].PixelSpacing]
-                    st = float(getattr(pix_meas[0], "SliceThickness", 1.0))
-                    mask_img.SetSpacing((ps[1], ps[0], st))
 
+            shared = getattr(seg, "SharedFunctionalGroupsSequence", None)
+            if shared and len(shared) > 0:
+                shared_group = shared[0]
+
+                # --- 1. Pixel Spacing & Thickness ---
+                pix_meas = getattr(shared_group, "PixelMeasuresSequence", None)
+                if pix_meas and len(pix_meas) > 0:
+                    meas = pix_meas[0]
+                    if hasattr(meas, "PixelSpacing") and len(meas.PixelSpacing) >= 2:
+                        ps = [float(v) for v in meas.PixelSpacing]
+                        st = float(getattr(meas, "SliceThickness", 1.0))
+                        mask_img.SetSpacing((ps[1], ps[0], st))
+
+                # --- 2. Image Orientation (Direction) ---
+                plane_orient = getattr(shared_group, "PlaneOrientationSequence", None)
+                if plane_orient and len(plane_orient) > 0:
+                    orient = plane_orient[0]
+                    if hasattr(orient, "ImageOrientationPatient") and len(orient.ImageOrientationPatient) >= 6:
+                        iop = [float(v) for v in orient.ImageOrientationPatient]
+                        row_cosine = np.array(iop[0:3])
+                        col_cosine = np.array(iop[3:6])
+                        slice_cosine = np.cross(row_cosine, col_cosine)
+
+                        direction_matrix = (
+                            row_cosine[0], row_cosine[1], row_cosine[2],
+                            col_cosine[0], col_cosine[1], col_cosine[2],
+                            slice_cosine[0], slice_cosine[1], slice_cosine[2]
+                        )
+                        mask_img.SetDirection(direction_matrix)
+
+            # --- 3. Image Origin (from Per-Frame Groups) ---
+            per_frame_groups = getattr(seg, "PerFrameFunctionalGroupsSequence", None)
+            if per_frame_groups and len(per_frame_groups) > 0:
+                # Grab the first frame to establish the origin of the 3D volume
+                first_frame = per_frame_groups[0]
+                plane_pos = getattr(first_frame, "PlanePositionSequence", None)
+
+                if plane_pos and len(plane_pos) > 0:
+                    pos = plane_pos[0]
+
+                    # Safely check if ImagePositionPatient exists and has 3 coordinates
+                    if hasattr(pos, "ImagePositionPatient") and len(pos.ImagePositionPatient) >= 3:
+                        origin = [float(v) for v in pos.ImagePositionPatient]
+                        mask_img.SetOrigin(tuple(origin))
             safe_label = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)
             out_path = output_dir / f"seg_{seg_num}_{safe_label}.nii.gz"
             sitk.WriteImage(mask_img, str(out_path))
@@ -249,6 +291,14 @@ def convert_dicom_seg_to_nifti(
 
     try:
         masks = convert_seg_file_to_nifti(seg_file, output_dir)
+        volumes_ml = {}
+        for label, path in masks.items():
+            mask = sitk.ReadImage(path)
+            volume = mask.GetSpacing()[0] * mask.GetSpacing()[1] * mask.GetSpacing()[2] * np.sum(mask) / 1000.0
+            volumes_ml[label] = volume
+            #logger.info(f"Volume of {label}: {volume} ml")
+            #logger.info(f"Number of voxels: {np.sum(mask)}")
+           # logger.info(f"Voxel volume: {mask.GetSpacing()[0] * mask.GetSpacing()[1] * mask.GetSpacing()[2]} mm^3")
     except Exception as exc:
         logger.exception("DICOM SEG conversion error")
         return json.dumps({"error": f"Conversion failed: {exc}"})
@@ -261,6 +311,7 @@ def convert_dicom_seg_to_nifti(
         "seg_series_instance_uid": seg_series_instance_uid,
         "segments": {label: path for label, path in masks.items()},
         "num_segments": len(masks),
+        "volumes_ml": volumes_ml,
         "message": (
             f"Converted {len(masks)} segment(s): {', '.join(masks.keys())}. "
             "Pass the mask path(s) to extract_radiomics."

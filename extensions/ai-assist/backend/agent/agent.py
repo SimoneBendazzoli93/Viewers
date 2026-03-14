@@ -45,6 +45,13 @@ When given a task, follow these priorities:
   `convert_dicom_seg_to_nifti` first to get the NIfTI mask path(s).
 - Only call TotalSegmentator / nnU-Net if no DICOM SEG is available in the study.
 
+**Description of the segmentation:**
+- Describe the segmentation mask using the tool `convert_dicom_seg_to_nifti` to get a description of the segmentation mask.
+- The description should include the following information:
+  - The number of segments in the segmentation mask
+  - The name of the segments(e.g. "Liver", "Lesion_1")
+  - Their volume in milliliters
+
 **Radiomics:**
 - When a DICOM SEG is available, pass its `seg_series_instance_uid` to `extract_radiomics` so
   features are computed per anatomical segment rather than on the whole volume.
