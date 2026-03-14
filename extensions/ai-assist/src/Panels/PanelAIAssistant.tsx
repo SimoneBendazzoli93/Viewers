@@ -14,6 +14,56 @@ function nextId(): string {
   return `msg-${Date.now()}-${++messageIdCounter}`;
 }
 
+const WELCOME_MESSAGE: ChatMessage = {
+  id: 'welcome',
+  role: 'assistant',
+  content:
+    'Hello! I am your AI radiology assistant. I can help you with:\n• Generating structured radiology reports\n• Running automatic organ segmentation\n• Extracting radiomics features\n• Answering questions about the current study\n\nUse the quick actions below or type a message to get started.',
+  timestamp: new Date(),
+};
+
+function storageKey(studyUID: string | null): string | null {
+  return studyUID ? `ohif-ai-chat-${studyUID}` : null;
+}
+
+function loadHistory(studyUID: string | null): ChatMessage[] {
+  const key = storageKey(studyUID);
+  if (!key) return [{ ...WELCOME_MESSAGE, timestamp: new Date() }];
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [{ ...WELCOME_MESSAGE, timestamp: new Date() }];
+    const parsed = JSON.parse(raw) as ChatMessage[];
+    return parsed.map(m => ({ ...m, timestamp: new Date(m.timestamp) }));
+  } catch {
+    return [{ ...WELCOME_MESSAGE, timestamp: new Date() }];
+  }
+}
+
+function saveHistory(studyUID: string | null, msgs: ChatMessage[]): void {
+  const key = storageKey(studyUID);
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify(msgs));
+  } catch {
+    // quota exceeded or private browsing — silently skip
+  }
+}
+
+function getActiveStudyUID(servicesManager: AppTypes.ServicesManager | undefined): string | null {
+  try {
+    if (!servicesManager) return null;
+    const { viewportGridService, displaySetService } = servicesManager.services;
+    const { activeViewportId, viewports } = viewportGridService.getState();
+    const viewport = viewports.get(activeViewportId);
+    if (!viewport?.displaySetInstanceUIDs?.length) return null;
+    const uid = viewport.displaySetInstanceUIDs[0];
+    const displaySet = displaySetService.getDisplaySetByUID(uid);
+    return displaySet?.StudyInstanceUID ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function buildStudyContext(servicesManager: AppTypes.ServicesManager) {
   try {
     const { viewportGridService, displaySetService } = servicesManager.services;
@@ -65,15 +115,10 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const system = useSystem();
   const services = servicesManager ?? system?.servicesManager;
 
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome',
-      role: 'assistant',
-      content:
-        'Hello! I am your AI radiology assistant. I can help you with:\n• Generating structured radiology reports\n• Running automatic organ segmentation\n• Extracting radiomics features\n• Answering questions about the current study\n\nUse the quick actions below or type a message to get started.',
-      timestamp: new Date(),
-    },
-  ]);
+  const [activeStudyUID, setActiveStudyUID] = useState<string | null>(() =>
+    getActiveStudyUID(services)
+  );
+  const [messages, setMessages] = useState<ChatMessage[]>(() => loadHistory(getActiveStudyUID(services)));
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
@@ -83,6 +128,35 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamingMessageIdRef = useRef<string | null>(null);
+  const activeStudyUIDRef = useRef<string | null>(activeStudyUID);
+  activeStudyUIDRef.current = activeStudyUID;
+
+  // Persist messages to localStorage whenever they change
+  useEffect(() => {
+    saveHistory(activeStudyUID, messages);
+  }, [messages, activeStudyUID]);
+
+  // Watch for active study changes via viewport grid events
+  useEffect(() => {
+    if (!services) return;
+    const { viewportGridService } = services.services;
+
+    const handleViewportChange = () => {
+      const newStudyUID = getActiveStudyUID(services);
+      if (newStudyUID !== activeStudyUIDRef.current) {
+        setActiveStudyUID(newStudyUID);
+        setMessages(loadHistory(newStudyUID));
+      }
+    };
+
+    const unsubscribe = viewportGridService.subscribe(
+      viewportGridService.EVENTS?.ACTIVE_VIEWPORT_ID_CHANGED ?? 'ACTIVE_VIEWPORT_ID_CHANGED',
+      handleViewportChange
+    );
+    return () => {
+      unsubscribe?.unsubscribe?.();
+    };
+  }, [services]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -253,6 +327,8 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   };
 
   const handleClearChat = () => {
+    const key = storageKey(activeStudyUID);
+    if (key) localStorage.removeItem(key);
     setMessages([
       {
         id: nextId(),
