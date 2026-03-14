@@ -6,6 +6,8 @@ export interface ChatMessage {
   toolName?: string;
   toolStatus?: 'running' | 'success' | 'error';
   toolResult?: string;
+  /** Elapsed-time string injected by tool_progress events while the tool runs. */
+  toolProgress?: string;
 }
 
 export type ChatHistoryStorage = 'localStorage' | 'sessionStorage' | 'none' | 'server';
@@ -63,9 +65,11 @@ export interface AgentAction {
 }
 
 export interface StreamMessage {
-  type: 'thought' | 'action' | 'observation' | 'final' | 'error' | 'tool_start' | 'tool_end';
+  type: 'thought' | 'action' | 'observation' | 'final' | 'error' | 'tool_start' | 'tool_end' | 'tool_progress';
   content: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
   toolOutput?: string;
+  /** Seconds elapsed since the current tool started (present on tool_progress events). */
+  elapsed?: number;
 }

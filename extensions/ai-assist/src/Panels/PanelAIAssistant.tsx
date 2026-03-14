@@ -470,6 +470,20 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
           ]);
           break;
 
+        case 'tool_progress':
+          // Update the elapsed-time indicator on the last running tool message.
+          setMessages(prev => {
+            const updated = [...prev];
+            for (let i = updated.length - 1; i >= 0; i--) {
+              if (updated[i].role === 'tool' && updated[i].toolStatus === 'running') {
+                updated[i] = { ...updated[i], toolProgress: event.content };
+                break;
+              }
+            }
+            return updated;
+          });
+          break;
+
         case 'tool_end':
           // Update the last running tool message to success/error
           setMessages(prev => {

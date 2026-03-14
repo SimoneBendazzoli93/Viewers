@@ -11,7 +11,9 @@ endpoint via an async generator.
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 from typing import AsyncIterator, Optional
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
@@ -106,6 +108,11 @@ async def stream_agent_response(
     """
     Run the ReAct agent and yield Server-Sent Events (SSE) data strings.
 
+    Uses an asyncio.Queue so that a background heartbeat coroutine can inject
+    ``tool_progress`` events every few seconds while a long-running tool is
+    executing.  The event loop is free during ``run_in_executor`` awaits inside
+    LangGraph, so the heartbeat *will* run even when the tool thread is busy.
+
     Yields:
         SSE data lines in the format ``data: <json>\\n\\n``
     """
@@ -131,9 +138,6 @@ async def stream_agent_response(
             lc_messages.append(AIMessage(content=content))
 
     # Append study context to the user message.
-    # Fill in DICOMweb fields from environment variables when the frontend did
-    # not supply them (e.g. scripted / API usage without a live OHIF session).
-    # wadoRoot is what the LLM should pass as dicomweb_url to the tools.
     user_content = message
     if study_context:
         effective_wado = (
@@ -163,7 +167,6 @@ async def stream_agent_response(
         ctx_lines = "\n".join(f"  {k}: {v}" for k, v in study_context.items() if v is not None and v != "")
         user_content = f"{message}\n\n[Current Study Context]\n{ctx_lines}"
     else:
-        # No study context from the frontend — build a minimal one from env vars.
         wado = settings.dicomweb_wado_root or settings.dicomweb_url
         qido = settings.dicomweb_qido_root or settings.dicomweb_url or wado
         if wado:
@@ -178,58 +181,108 @@ async def stream_agent_response(
 
     lc_messages.append(HumanMessage(content=user_content))
 
-    final_answer = ""
+    # ── Shared mutable state accessed by both coroutines ──────────────────────
+    # Using a dict avoids needing `nonlocal` inside nested async functions.
+    state = {
+        "final_answer": "",
+        "tool_running": False,   # True while a tool thread is executing
+        "tool_start_time": 0.0,  # monotonic time when the current tool started
+    }
 
-    async for event in agent.astream_events(
-        {"messages": lc_messages},
-        version="v2",
-        stream_mode="values",
-    ):
-        kind = event.get("event", "")
-        data = event.get("data", {})
+    # SSE events are funnelled through this queue so the heartbeat and the
+    # agent event loop can both produce output concurrently.
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
 
-        if kind == "on_chat_model_stream":
-            chunk = data.get("chunk")
-            if chunk and hasattr(chunk, "content") and chunk.content:
-                token = chunk.content
-                final_answer += token
-                yield _sse({"type": "observation", "content": token})
+    # ── Background coroutine: drain astream_events → queue ────────────────────
+    async def _consume_agent_events() -> None:
+        try:
+            async for event in agent.astream_events(
+                {"messages": lc_messages},
+                version="v2",
+                stream_mode="values",
+            ):
+                kind = event.get("event", "")
+                data = event.get("data", {})
 
-        elif kind == "on_tool_start":
-            tool_name = event.get("name", "tool")
-            tool_input = data.get("input", {})
-            yield _sse({
-                "type": "tool_start",
-                "toolName": tool_name,
-                "toolInput": tool_input,
-                "content": f"Running tool: {tool_name}",
-            })
+                if kind == "on_chat_model_stream":
+                    chunk = data.get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        token = chunk.content
+                        state["final_answer"] += token
+                        await queue.put(_sse({"type": "observation", "content": token}))
 
-        elif kind == "on_tool_end":
-            tool_name = event.get("name", "tool")
-            tool_output = data.get("output", "")
-            # Try to parse output for nicer display
-            try:
-                parsed = json.loads(tool_output)
-                display = parsed.get("message", tool_output)
-            except Exception:
-                display = str(tool_output)[:500]
+                elif kind == "on_tool_start":
+                    state["tool_running"] = True
+                    state["tool_start_time"] = time.monotonic()
+                    tool_name = event.get("name", "tool")
+                    tool_input = data.get("input", {})
+                    await queue.put(_sse({
+                        "type": "tool_start",
+                        "toolName": tool_name,
+                        "toolInput": tool_input,
+                        "content": f"Running tool: {tool_name}",
+                    }))
 
-            yield _sse({
-                "type": "tool_end",
-                "toolName": tool_name,
-                "toolOutput": display,
-                "content": display,
-            })
+                elif kind == "on_tool_end":
+                    state["tool_running"] = False
+                    tool_name = event.get("name", "tool")
+                    tool_output = data.get("output", "")
+                    try:
+                        parsed = json.loads(tool_output)
+                        display = parsed.get("message", tool_output)
+                    except Exception:
+                        display = str(tool_output)[:500]
+                    await queue.put(_sse({
+                        "type": "tool_end",
+                        "toolName": tool_name,
+                        "toolOutput": display,
+                        "content": display,
+                    }))
 
-        elif kind == "on_chat_model_end":
-            # Final message from the LLM (may be empty if tool call)
-            output = data.get("output")
-            if output and hasattr(output, "content") and output.content:
-                final_answer = output.content
+                elif kind == "on_chat_model_end":
+                    output = data.get("output")
+                    if output and hasattr(output, "content") and output.content:
+                        state["final_answer"] = output.content
 
-    # Emit final answer
-    yield _sse({"type": "final", "content": final_answer})
+        finally:
+            # Signal the consumer that we're done regardless of how we exited.
+            await queue.put(None)
+
+    # ── Background coroutine: heartbeat → queue ───────────────────────────────
+    # Runs every HEARTBEAT_INTERVAL seconds; while a tool is active it emits a
+    # tool_progress event so the UI shows elapsed time instead of a frozen spinner.
+    HEARTBEAT_INTERVAL = 5  # seconds
+
+    async def _heartbeat() -> None:
+        while True:
+            await asyncio.sleep(HEARTBEAT_INTERVAL)
+            if state["tool_running"]:
+                elapsed = int(time.monotonic() - state["tool_start_time"])
+                await queue.put(_sse({
+                    "type": "tool_progress",
+                    "elapsed": elapsed,
+                    "content": f"{elapsed}s elapsed",
+                }))
+
+    # ── Start both tasks and drain the queue ──────────────────────────────────
+    agent_task = asyncio.create_task(_consume_agent_events())
+    hb_task = asyncio.create_task(_heartbeat())
+
+    try:
+        while True:
+            item = await queue.get()
+            if item is None:  # sentinel: agent finished
+                break
+            yield item
+    finally:
+        hb_task.cancel()
+        # Absorb the CancelledError so it doesn't propagate
+        try:
+            await hb_task
+        except asyncio.CancelledError:
+            pass
+
+    yield _sse({"type": "final", "content": state["final_answer"]})
     yield "data: [DONE]\n\n"
 
 

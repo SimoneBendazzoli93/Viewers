@@ -30,7 +30,10 @@ export function ChatMessage({ message }: Props) {
             <span className="text-muted-foreground">Tool:</span>
             <span className="font-semibold">{message.toolName}</span>
             {message.toolStatus === 'running' && (
-              <span className="animate-pulse text-yellow-400">running...</span>
+              <span className="animate-pulse text-yellow-400">
+                running
+                {message.toolProgress ? ` · ${message.toolProgress}` : '...'}
+              </span>
             )}
             {message.toolStatus === 'success' && (
               <span className="text-green-400">✓ done</span>
