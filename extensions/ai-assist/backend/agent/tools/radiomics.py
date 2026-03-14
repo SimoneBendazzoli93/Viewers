@@ -176,9 +176,6 @@ def extract_radiomics(
     )
 
     # ── Write CSV with all extracted features ─────────────────────────────────
-    # Columns: study_instance_uid, series_instance_uid, mask_source,
-    #          segment, feature_class, feature_name, value
-    # Feature key format from PyRadiomics: "original_<class>_<name>"
     csv_path = radiomics_dir / "radiomics_features.csv"
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -190,7 +187,7 @@ def extract_radiomics(
             if "error" in features:
                 continue
             for feat_key, feat_val in features.items():
-                parts = feat_key.split("_")          # e.g. ["original", "firstorder", "Mean"]
+                parts = feat_key.split("_")
                 feature_class = parts[1] if len(parts) >= 3 else "unknown"
                 feature_name = "_".join(parts[2:]) if len(parts) >= 3 else feat_key
                 writer.writerow([
@@ -203,8 +200,32 @@ def extract_radiomics(
                     feat_val,
                 ])
 
-    # The download URL is a backend-relative path; the frontend prepends the
-    # configured backend base URL before opening the link.
+    # ── Build compact highlights for the LLM ─────────────────────────────────
+    # The full feature set lives in the CSV. The tool return only includes a
+    # curated subset so the SSE event, the LangGraph ToolMessage context, and
+    # React state all stay small (a few KB instead of 50 KB+).
+    _HIGHLIGHT_NAMES = frozenset({
+        # Shape
+        "Elongation", "Sphericity", "MeshVolume", "VoxelVolume",
+        # First-order
+        "Mean", "Median", "StandardDeviation", "Entropy", "Skewness",
+        # GLCM
+        "Correlation", "JointEnergy", "Contrast",
+        # GLRLM
+        "RunLengthNonUniformity", "ShortRunEmphasis",
+        # GLSZM
+        "ZoneVariance",
+    })
+    highlights: dict[str, dict] = {}
+    for label, features in per_segment.items():
+        if "error" in features:
+            highlights[label] = {"error": features["error"]}
+            continue
+        highlights[label] = {
+            k: v for k, v in features.items()
+            if "_".join(k.split("_")[2:]) in _HIGHLIGHT_NAMES
+        }
+
     download_url = f"/api/files/download?path={csv_path}"
 
     return json.dumps({
@@ -213,13 +234,13 @@ def extract_radiomics(
         "segments": list(per_segment.keys()),
         "num_segments": len(per_segment),
         "total_features": total_features,
-        "output_dir": str(radiomics_dir),
         "csv_path": str(csv_path),
         "download_url": download_url,
-        "results": per_segment,
+        "highlights": highlights,
         "message": (
-            f"Extracted radiomics features for {len(per_segment)} segment(s) "
-            f"({mask_source}): {', '.join(per_segment.keys())}. "
-            f"CSV available for download."
+            f"Extracted {total_features} radiomics features for "
+            f"{len(per_segment)} segment(s) ({mask_source}): "
+            f"{', '.join(per_segment.keys())}. "
+            f"Full results in CSV (download_url). Key highlights included."
         ),
     })

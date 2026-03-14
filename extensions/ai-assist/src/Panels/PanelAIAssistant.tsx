@@ -199,6 +199,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const activeStudyUIDRef = useRef<string | null>(activeStudyUID);
   activeStudyUIDRef.current = activeStudyUID;
   const serverSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const browserSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Always-current messages reference — used inside debounced server-save callbacks
   // so the timer closure never captures a stale snapshot of messages.
@@ -228,20 +229,24 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   );
 
   // ── Persist messages whenever they change ─────────────────────────────────
-  // Browser storage: synchronous write on every change.
-  // Server storage: debounced 1.5 s; the timer always reads latestMessagesRef
-  // so it reflects the most recent state, and is gated by historyReadyRef so
-  // we never overwrite real history with the initial welcome-message placeholder.
+  // Both browser and server storage are debounced so rapid streaming updates
+  // (one setMessages call per token) don't trigger a synchronous
+  // JSON.stringify + storage write on every render.
+  // The timer always reads latestMessagesRef so it uses the latest state even
+  // though the closure was created earlier.
   useEffect(() => {
     if (config.chatHistoryStorage === 'server') {
       if (!activeStudyUID) return;
       if (serverSaveTimerRef.current) clearTimeout(serverSaveTimerRef.current);
       serverSaveTimerRef.current = setTimeout(() => {
-        if (!historyReadyRef.current) return; // server load still in-flight
+        if (!historyReadyRef.current) return;
         agentService.saveServerHistory(activeStudyUID, latestMessagesRef.current);
       }, 1500);
     } else {
-      saveHistory(activeStudyUID, messages, config.chatHistoryStorage);
+      if (browserSaveTimerRef.current) clearTimeout(browserSaveTimerRef.current);
+      browserSaveTimerRef.current = setTimeout(() => {
+        saveHistory(activeStudyUID, latestMessagesRef.current, config.chatHistoryStorage);
+      }, 500);
     }
   }, [messages, activeStudyUID, config.chatHistoryStorage]);
 
@@ -507,7 +512,10 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
             // non-JSON output or no download_url — no button
           }
 
-          // Update the last running tool message to success/error
+          // Update the last running tool message to success/error.
+          // toolResult is intentionally not stored — it is never rendered and
+          // can be very large (full radiomics JSON), which would bloat React
+          // state and slow down every subsequent JSON.stringify for storage.
           setMessages(prev => {
             const updated = [...prev];
             for (let i = updated.length - 1; i >= 0; i--) {
@@ -515,7 +523,6 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
                 updated[i] = {
                   ...updated[i],
                   toolStatus: event.type === 'tool_end' ? 'success' : 'error',
-                  toolResult: event.toolOutput,
                   ...(downloadUrl ? { downloadUrl, downloadFilename } : {}),
                 };
                 break;
