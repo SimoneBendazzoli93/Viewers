@@ -153,52 +153,124 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   activeStudyUIDRef.current = activeStudyUID;
   const serverSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Persist messages whenever they change (browser storage = sync; server = debounced 1.5 s)
+  // Always-current messages reference — used inside debounced server-save callbacks
+  // so the timer closure never captures a stale snapshot of messages.
+  const latestMessagesRef = useRef<ChatMessage[]>(messages);
+  latestMessagesRef.current = messages;
+
+  // True once the initial history load for the current study has completed.
+  // Prevents the server-save debounce from writing a "welcome-only" snapshot
+  // to the server before we have received the real history from it.
+  const historyReadyRef = useRef<boolean>(
+    // For browser storage the useState initializer already loaded synchronously,
+    // so we can consider it ready unless the study UID was unavailable at that time.
+    config.chatHistoryStorage !== 'server' && activeStudyUID !== null
+  );
+
+  // ── Persist messages whenever they change ─────────────────────────────────
+  // Browser storage: synchronous write on every change.
+  // Server storage: debounced 1.5 s; the timer always reads latestMessagesRef
+  // so it reflects the most recent state, and is gated by historyReadyRef so
+  // we never overwrite real history with the initial welcome-message placeholder.
   useEffect(() => {
     if (config.chatHistoryStorage === 'server') {
       if (!activeStudyUID) return;
       if (serverSaveTimerRef.current) clearTimeout(serverSaveTimerRef.current);
       serverSaveTimerRef.current = setTimeout(() => {
-        agentService.saveServerHistory(activeStudyUID, messages);
+        if (!historyReadyRef.current) return; // server load still in-flight
+        agentService.saveServerHistory(activeStudyUID, latestMessagesRef.current);
       }, 1500);
     } else {
       saveHistory(activeStudyUID, messages, config.chatHistoryStorage);
     }
   }, [messages, activeStudyUID, config.chatHistoryStorage]);
 
-  // Load server history when storage type is 'server' and study changes
+  // ── Load history when study or storage type changes ───────────────────────
+  // Handles both the initial mount (if the study UID was null when useState ran)
+  // and subsequent study switches triggered by the viewport subscription below.
   useEffect(() => {
-    if (config.chatHistoryStorage !== 'server' || !activeStudyUID) return;
-    agentService.loadServerHistory(activeStudyUID).then(loaded => {
-      if (loaded.length > 0) setMessages(loaded);
-    });
+    if (!activeStudyUID || config.chatHistoryStorage === 'none') {
+      historyReadyRef.current = true;
+      return;
+    }
+
+    if (config.chatHistoryStorage === 'server') {
+      historyReadyRef.current = false;
+      agentService.loadServerHistory(activeStudyUID).then(loaded => {
+        if (loaded.length > 0) setMessages(loaded);
+        historyReadyRef.current = true;
+      });
+    } else {
+      // localStorage / sessionStorage: synchronous load.
+      // Only update messages if the current state is still the welcome placeholder —
+      // i.e. the useState initializer did not load history because the study UID
+      // was unavailable at render time.
+      setMessages(prev => {
+        if (prev.length === 1 && prev[0].id === WELCOME_MESSAGE.id) {
+          const loaded = loadHistory(activeStudyUID, config.chatHistoryStorage);
+          return loaded;
+        }
+        return prev; // already populated by useState initializer — no-op
+      });
+      historyReadyRef.current = true;
+    }
   }, [activeStudyUID, config.chatHistoryStorage]);
 
-  // Watch for active study changes via viewport grid events
+  // ── Watch for active study changes ────────────────────────────────────────
+  // Subscribes to viewport-grid events AND display-set events so we catch:
+  //   (a) the user switching to a different study inside the viewer, and
+  //   (b) the initial study load that may have completed before this component
+  //       mounted (ACTIVE_VIEWPORT_ID_CHANGED would have already fired).
+  // The handler is also invoked immediately after subscribing to cover (b).
   useEffect(() => {
     if (!services) return;
-    const { viewportGridService } = services.services;
+    const { viewportGridService, displaySetService } = services.services;
 
-    const handleViewportChange = () => {
+    const handleStudyChange = () => {
       const newStudyUID = getActiveStudyUID(services);
-      if (newStudyUID !== activeStudyUIDRef.current) {
-        setActiveStudyUID(newStudyUID);
-        const cfg = agentService.getConfig();
-        if (cfg.chatHistoryStorage !== 'server') {
-          setMessages(loadHistory(newStudyUID, cfg.chatHistoryStorage));
-        } else {
-          setMessages([{ ...WELCOME_MESSAGE, timestamp: new Date() }]);
-          // server load triggered by the activeStudyUID effect above
-        }
+      if (newStudyUID === activeStudyUIDRef.current) return; // no change
+
+      setActiveStudyUID(newStudyUID);
+      activeStudyUIDRef.current = newStudyUID;
+
+      if (!newStudyUID || config.chatHistoryStorage === 'none') {
+        historyReadyRef.current = true;
+        return;
+      }
+
+      // For browser storage, load synchronously right here so the messages
+      // state is set in the same React batch as setActiveStudyUID.
+      if (config.chatHistoryStorage !== 'server') {
+        setMessages(loadHistory(newStudyUID, config.chatHistoryStorage));
+        historyReadyRef.current = true;
+      } else {
+        // Server: reset to welcome; the load effect will fire when activeStudyUID
+        // state updates and trigger the async fetch.
+        setMessages([{ ...WELCOME_MESSAGE, timestamp: new Date() }]);
+        historyReadyRef.current = false;
       }
     };
 
-    const unsubscribe = viewportGridService.subscribe(
+    // ★ Immediate check — covers the case where the study was already loaded
+    //   before this component mounted and the viewport event won't fire again.
+    handleStudyChange();
+
+    const vpUnsub = viewportGridService.subscribe(
       viewportGridService.EVENTS?.ACTIVE_VIEWPORT_ID_CHANGED ?? 'ACTIVE_VIEWPORT_ID_CHANGED',
-      handleViewportChange
+      handleStudyChange
     );
+
+    // Also watch display-set changes: if display sets weren't available when the
+    // immediate check ran (getActiveStudyUID returned null), this catches the
+    // moment they finish loading.
+    const dsUnsub = displaySetService?.subscribe?.(
+      displaySetService.EVENTS?.DISPLAY_SETS_CHANGED ?? 'DISPLAY_SETS_CHANGED',
+      handleStudyChange
+    );
+
     return () => {
-      unsubscribe?.unsubscribe?.();
+      vpUnsub?.unsubscribe?.();
+      dsUnsub?.unsubscribe?.();
     };
   }, [services]);
 
