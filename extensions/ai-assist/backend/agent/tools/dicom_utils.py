@@ -11,6 +11,23 @@ from typing import Optional
 import pydicom
 from dicomweb_client.api import DICOMwebClient
 
+from config import settings
+
+
+def resolve_dicomweb_url(provided: str | None) -> str:
+    """
+    Return *provided* if non-empty, otherwise fall back to the server-level
+    ``DICOMWEB_URL`` environment variable.  Raises ``ValueError`` if neither
+    is available so callers get a clear error instead of a silent None.
+    """
+    url = provided or settings.dicomweb_url
+    if not url:
+        raise ValueError(
+            "No DICOMweb URL available. Either pass dicomweb_url explicitly "
+            "or set DICOMWEB_URL in the backend environment."
+        )
+    return url
+
 
 def fetch_series_to_dir(
     dicomweb_url: str,

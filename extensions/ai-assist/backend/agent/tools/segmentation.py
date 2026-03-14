@@ -19,7 +19,7 @@ import httpx
 from langchain_core.tools import tool
 
 from config import settings
-from .dicom_utils import fetch_series_to_dir
+from .dicom_utils import fetch_series_to_dir, resolve_dicomweb_url
 
 
 # ── TotalSegmentator ────────────────────────────────────────────────────────
@@ -28,7 +28,7 @@ from .dicom_utils import fetch_series_to_dir
 def run_totalsegmentator(
     study_instance_uid: str,
     series_instance_uid: str,
-    dicomweb_url: str,
+    dicomweb_url: Optional[str] = None,
     structures: Optional[list[str]] = None,
     task: str = "total",
     fast: bool = False,
@@ -40,6 +40,7 @@ def run_totalsegmentator(
         study_instance_uid: DICOM Study Instance UID.
         series_instance_uid: DICOM Series Instance UID to segment.
         dicomweb_url: DICOMweb WADO-RS base URL to fetch the series from.
+            Optional — falls back to the server's DICOMWEB_URL env var.
         structures: Optional list of specific structures to segment.
         task: TotalSegmentator task name (default: 'total').
         fast: Use fast mode (lower resolution, faster inference).
@@ -47,12 +48,17 @@ def run_totalsegmentator(
     Returns:
         JSON string with segmentation results including output paths and structure list.
     """
+    try:
+        url = resolve_dicomweb_url(dicomweb_url)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
+
     series_dir = settings.dicom_cache_dir / study_instance_uid / series_instance_uid
     output_dir = settings.segmentation_output_dir / study_instance_uid / series_instance_uid / "totalsegmentator"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Fetch DICOM files
-    dcm_files = fetch_series_to_dir(dicomweb_url, study_instance_uid, series_instance_uid, series_dir)
+    dcm_files = fetch_series_to_dir(url, study_instance_uid, series_instance_uid, series_dir)
     if not dcm_files:
         return json.dumps({"error": "No DICOM files found for the requested series."})
 
@@ -101,7 +107,7 @@ def run_totalsegmentator(
 def run_nnunet(
     study_instance_uid: str,
     series_instance_uid: str,
-    dicomweb_url: str,
+    dicomweb_url: Optional[str] = None,
     dataset_id: int = 220,
     configuration: str = "3d_fullres",
     fold: str = "all",
@@ -113,6 +119,7 @@ def run_nnunet(
         study_instance_uid: DICOM Study Instance UID.
         series_instance_uid: DICOM Series Instance UID.
         dicomweb_url: DICOMweb WADO-RS base URL.
+            Optional — falls back to the server's DICOMWEB_URL env var.
         dataset_id: nnU-Net dataset ID (default 220 = AutoPET).
         configuration: nnU-Net configuration (default '3d_fullres').
         fold: Fold to use (default 'all' = ensemble).
@@ -120,6 +127,11 @@ def run_nnunet(
     Returns:
         JSON string with segmentation result.
     """
+    try:
+        url = resolve_dicomweb_url(dicomweb_url)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
+
     series_dir = settings.dicom_cache_dir / study_instance_uid / series_instance_uid
     output_dir = (
         settings.segmentation_output_dir
@@ -129,7 +141,7 @@ def run_nnunet(
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    dcm_files = fetch_series_to_dir(dicomweb_url, study_instance_uid, series_instance_uid, series_dir)
+    dcm_files = fetch_series_to_dir(url, study_instance_uid, series_instance_uid, series_dir)
     if not dcm_files:
         return json.dumps({"error": "No DICOM files found."})
 
@@ -174,9 +186,9 @@ def run_nnunet(
 def run_custom_segmentation(
     study_instance_uid: str,
     series_instance_uid: str,
-    dicomweb_url: str,
     model_id: str,
     endpoint_url: str,
+    dicomweb_url: Optional[str] = None,
 ) -> str:
     """
     Call a custom REST segmentation endpoint with the series DICOM files.
@@ -189,15 +201,21 @@ def run_custom_segmentation(
     Args:
         study_instance_uid: DICOM Study Instance UID.
         series_instance_uid: DICOM Series Instance UID.
-        dicomweb_url: DICOMweb source URL.
         model_id: Identifier of the custom model.
         endpoint_url: Full URL of the segmentation REST endpoint.
+        dicomweb_url: DICOMweb source URL.
+            Optional — falls back to the server's DICOMWEB_URL env var.
 
     Returns:
         JSON string with the endpoint response.
     """
+    try:
+        url = resolve_dicomweb_url(dicomweb_url)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
+
     payload = {
-        "dicomweb_url": dicomweb_url,
+        "dicomweb_url": url,
         "study_uid": study_instance_uid,
         "series_uid": series_instance_uid,
         "model_id": model_id,

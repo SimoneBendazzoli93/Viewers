@@ -17,6 +17,7 @@ from typing import AsyncIterator, Optional
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langgraph.prebuilt import create_react_agent
 
+from config import settings
 from .llm_factory import create_llm, LLMProvider
 from .tools import (
     run_totalsegmentator,
@@ -58,6 +59,10 @@ When given a task, follow these priorities:
 - Always compile the report AFTER collecting all available data.
 - Be precise with UIDs and parameters.
 - If something fails, explain the error clearly and suggest alternatives.
+- The `dicomweb_url` parameter in every tool is **optional**. If it is present
+  in the study context, pass it through. If it is absent, omit it entirely —
+  the server will use its configured ``DICOMWEB_URL`` automatically. Never ask
+  the user for a DICOMweb URL.
 
 Current study context will be provided in the user message when available.
 The `availableSegmentations` field lists DICOM SEG series already loaded in the viewer.
@@ -117,11 +122,18 @@ async def stream_agent_response(
         elif role == "assistant":
             lc_messages.append(AIMessage(content=content))
 
-    # Append study context to the user message
+    # Append study context to the user message.
+    # If the frontend did not supply a dicomwebUrl but DICOMWEB_URL is set in
+    # the environment, inject it here so the LLM sees it in context and never
+    # needs to ask the user for it.
     user_content = message
     if study_context:
+        if not study_context.get("dicomwebUrl") and settings.dicomweb_url:
+            study_context = {**study_context, "dicomwebUrl": settings.dicomweb_url}
         ctx_lines = "\n".join(f"  {k}: {v}" for k, v in study_context.items() if v)
         user_content = f"{message}\n\n[Current Study Context]\n{ctx_lines}"
+    elif settings.dicomweb_url:
+        user_content = f"{message}\n\n[Current Study Context]\n  dicomwebUrl: {settings.dicomweb_url}"
 
     lc_messages.append(HumanMessage(content=user_content))
 

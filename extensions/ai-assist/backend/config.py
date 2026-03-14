@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     # Optional Bearer token for remote Ollama servers that require authentication
     ollama_api_key: str | None = None
 
+    # ── DICOMweb ──────────────────────────────────────────────────────────
+    # Default DICOMweb WADO-RS base URL used when the OHIF viewer does not
+    # send one in the study context (e.g. for programmatic / scripted usage).
+    # When set, tools that require a DICOMweb URL will use it automatically
+    # and the agent will never need to ask the user for it.
+    # Example: http://orthanc:8042/wado   or   http://localhost:8080/dcm4chee-arc/aets/DCM4CHEE/rs
+    dicomweb_url: str | None = None
+
     # ── Segmentation ─────────────────────────────────────────────────────
     default_segmentation_model: str = "totalsegmentator"
 

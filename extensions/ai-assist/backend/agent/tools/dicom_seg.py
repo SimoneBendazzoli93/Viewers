@@ -20,7 +20,7 @@ import pydicom
 from langchain_core.tools import tool
 
 from config import settings
-from .dicom_utils import fetch_series_to_dir
+from .dicom_utils import fetch_series_to_dir, resolve_dicomweb_url
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +213,7 @@ def convert_seg_file_to_nifti(seg_dcm_path: Path, output_dir: Path) -> dict[str,
 def convert_dicom_seg_to_nifti(
     study_instance_uid: str,
     seg_series_instance_uid: str,
-    dicomweb_url: str,
+    dicomweb_url: Optional[str] = None,
 ) -> str:
     """
     Fetch a DICOM SEG series from DICOMweb and convert each segment to a
@@ -227,14 +227,20 @@ def convert_dicom_seg_to_nifti(
         study_instance_uid: DICOM Study Instance UID.
         seg_series_instance_uid: Series Instance UID of the DICOM SEG series.
         dicomweb_url: DICOMweb WADO-RS base URL (e.g. http://orthanc:8042/wado).
+            Optional — falls back to the server's DICOMWEB_URL env var.
 
     Returns:
         JSON with segment labels and the path to each NIfTI mask file.
     """
+    try:
+        url = resolve_dicomweb_url(dicomweb_url)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
+
     seg_dir = settings.dicom_cache_dir / study_instance_uid / seg_series_instance_uid
     output_dir = settings.segmentation_output_dir / study_instance_uid / seg_series_instance_uid / "dicom_seg"
 
-    dcm_files = fetch_series_to_dir(dicomweb_url, study_instance_uid, seg_series_instance_uid, seg_dir)
+    dcm_files = fetch_series_to_dir(url, study_instance_uid, seg_series_instance_uid, seg_dir)
     if not dcm_files:
         return json.dumps({"error": "No DICOM SEG files found for the given series UID."})
 

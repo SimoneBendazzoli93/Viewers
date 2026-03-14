@@ -160,12 +160,33 @@ The default is `/tmp/ohif-ai-chat-history`. The directory is created automatical
 | `DEFAULT_LLM_PROVIDER`        | `openai`                       | Default LLM provider                            |
 | `DEFAULT_LLM_MODEL`           | `gpt-4o`                       | Default model name                              |
 | `DEFAULT_SEGMENTATION_MODEL`  | `totalsegmentator`             | Active segmentation model                       |
+| `DICOMWEB_URL`                | —                              | Default DICOMweb WADO-RS base URL (see below)   |
 | `CUSTOM_SEG_ENDPOINTS`        | —                              | `id:url` pairs, comma-separated                 |
 | `TOTALSEGMENTATOR_TASK`       | `total`                        | TotalSegmentator task                           |
 | `TOTALSEGMENTATOR_FAST`       | `false`                        | Use fast mode for TotalSegmentator              |
 | `CHAT_HISTORY_DIR`            | `/tmp/ohif-ai-chat-history`    | Directory for server-side chat history files    |
 | `PORT`                        | `8000`                         | Backend server port                             |
 | `DEBUG`                       | `false`                        | Enable debug logging                            |
+
+### DICOMweb URL
+
+The agent needs a DICOMweb WADO-RS base URL to fetch DICOM series for segmentation and radiomics. There are two ways to supply it:
+
+| Source | When it applies |
+|--------|-----------------|
+| **OHIF viewer** (automatic) | When you open a study in the browser the viewer sends `dicomwebUrl` in every chat request. No configuration needed. |
+| **`DICOMWEB_URL` env var** | Fallback for scripted / API usage where no viewer context is available, or to override what the viewer sends. |
+
+```bash
+# .env
+DICOMWEB_URL=http://orthanc:8042/wado
+# or for dcm4chee:
+DICOMWEB_URL=http://localhost:8080/dcm4chee-arc/aets/DCM4CHEE/rs
+```
+
+When `DICOMWEB_URL` is set:
+- It is injected into the study context the agent sees, so the agent never asks the user for it.
+- All tools (`run_totalsegmentator`, `run_nnunet`, `run_custom_segmentation`, `convert_dicom_seg_to_nifti`, `extract_radiomics`) accept the URL as an optional parameter and fall back to this env var when it is omitted.
 
 ---
 

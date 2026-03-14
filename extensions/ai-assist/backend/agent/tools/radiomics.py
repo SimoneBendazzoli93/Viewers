@@ -12,7 +12,7 @@ import numpy as np
 from langchain_core.tools import tool
 
 from config import settings
-from .dicom_utils import fetch_series_to_dir
+from .dicom_utils import fetch_series_to_dir, resolve_dicomweb_url
 from .dicom_seg import convert_seg_file_to_nifti
 
 
@@ -37,7 +37,7 @@ def _convert_dcm_to_nifti(dcm_dir: Path, out_path: Path) -> bool:
 def extract_radiomics(
     study_instance_uid: str,
     series_instance_uid: str,
-    dicomweb_url: str,
+    dicomweb_url: Optional[str] = None,
     mask_path: Optional[str] = None,
     seg_series_instance_uid: Optional[str] = None,
     feature_classes: Optional[list[str]] = None,
@@ -57,6 +57,7 @@ def extract_radiomics(
         study_instance_uid: DICOM Study Instance UID.
         series_instance_uid: DICOM Series Instance UID for the image series.
         dicomweb_url: DICOMweb WADO-RS base URL to fetch the image.
+            Optional — falls back to the server's DICOMWEB_URL env var.
         mask_path: Optional explicit path to a NIfTI (.nii.gz) mask file.
         seg_series_instance_uid: Optional Series Instance UID of a DICOM SEG
             series in the same study to use as the segmentation mask.
@@ -67,6 +68,10 @@ def extract_radiomics(
         JSON string with extracted features or error message.
         When a DICOM SEG is used, results are returned per segment.
     """
+    try:
+        url = resolve_dicomweb_url(dicomweb_url)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
     try:
         import radiomics
         from radiomics import featureextractor
@@ -87,7 +92,7 @@ def extract_radiomics(
     radiomics_dir.mkdir(parents=True, exist_ok=True)
 
     # Fetch and convert image series
-    dcm_files = fetch_series_to_dir(dicomweb_url, study_instance_uid, series_instance_uid, series_dir)
+    dcm_files = fetch_series_to_dir(url, study_instance_uid, series_instance_uid, series_dir)
     if not dcm_files:
         return json.dumps({"error": "No DICOM files found for the requested series."})
 
@@ -112,7 +117,7 @@ def extract_radiomics(
             / "dicom_seg"
         )
         seg_dcm_files = fetch_series_to_dir(
-            dicomweb_url, study_instance_uid, seg_series_instance_uid, seg_cache_dir
+            url, study_instance_uid, seg_series_instance_uid, seg_cache_dir
         )
         if not seg_dcm_files:
             return json.dumps({"error": f"No DICOM SEG files found for series {seg_series_instance_uid}."})
