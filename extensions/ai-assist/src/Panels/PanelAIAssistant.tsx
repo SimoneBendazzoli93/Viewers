@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useSystem } from '@ohif/core';
 import type { ChatHistoryStorage, ChatMessage, AgentConfig, StreamMessage, DicomWebContext } from '../types';
 import { AIAgentService } from '../services/AIAgentService';
@@ -8,6 +8,10 @@ import { QuickActionBar } from '../components/QuickActionBar';
 
 // Singleton service instance
 const agentService = new AIAgentService();
+
+// Number of messages to display per page. Earlier messages are loaded on
+// scroll-up so large histories don't stall the browser all at once.
+const PAGE_SIZE = 50;
 
 let messageIdCounter = 0;
 function nextId(): string {
@@ -183,7 +187,13 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const [config, setConfig] = useState<AgentConfig>(agentService.getConfig());
   const [backendStatus, setBackendStatus] = useState<'unknown' | 'ok' | 'error'>('unknown');
 
+  // How many messages (counting from the newest) are currently rendered.
+  // Scrolling up past the top of the list loads the previous PAGE_SIZE chunk.
+  const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // The scrollable messages container — needed to read/set scrollTop.
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamingMessageIdRef = useRef<string | null>(null);
   const activeStudyUIDRef = useRef<string | null>(activeStudyUID);
@@ -194,6 +204,19 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   // so the timer closure never captures a stale snapshot of messages.
   const latestMessagesRef = useRef<ChatMessage[]>(messages);
   latestMessagesRef.current = messages;
+
+  // Set to true by the "load more" handler before increasing displayCount so
+  // the layout effect knows to restore the scroll position instead of
+  // jumping to the bottom.
+  const isLoadingMoreRef = useRef(false);
+  // Scroll height snapshotted just before a "load more" render so we can
+  // compute how much the content grew and adjust scrollTop accordingly.
+  const prevScrollHeightRef = useRef(0);
+
+  // Slice of the full messages array that is currently rendered.
+  const visibleStart = Math.max(0, messages.length - displayCount);
+  const visibleMessages = messages.slice(visibleStart);
+  const hasMore = visibleStart > 0;
 
   // True once the initial history load for the current study has completed.
   // Prevents the server-save debounce from writing a "welcome-only" snapshot
@@ -311,10 +334,38 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
     };
   }, [services]);
 
-  // Auto-scroll to bottom when messages change
-  useEffect(() => {
+  // Scroll behaviour after every render that touches the visible message list:
+  //   • "load more" render  → restore relative scroll position so the view
+  //     doesn't jump to the top after older messages are prepended.
+  //   • any other render    → smooth-scroll to the bottom (new message / stream).
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    if (isLoadingMoreRef.current) {
+      // Pin the user's position: adjust scrollTop by however much the content grew.
+      container.scrollTop = container.scrollHeight - prevScrollHeightRef.current;
+      isLoadingMoreRef.current = false;
+      return;
+    }
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, displayCount]);
+
+  // Load an older page of messages when the user scrolls close to the top.
+  const handleScrollMessages = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container || !hasMore) return;
+    if (container.scrollTop < 80) {
+      prevScrollHeightRef.current = container.scrollHeight;
+      isLoadingMoreRef.current = true;
+      setDisplayCount(prev => prev + PAGE_SIZE);
+    }
+  }, [hasMore]);
+
+  // When the active study changes, restart from the latest messages so the
+  // user always sees the end of the new conversation immediately.
+  useEffect(() => {
+    setDisplayCount(PAGE_SIZE);
+  }, [activeStudyUID]);
 
   // Check backend health on mount and after config change
   useEffect(() => {
@@ -485,6 +536,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
     } else {
       clearHistory(activeStudyUID, config.chatHistoryStorage);
     }
+    setDisplayCount(PAGE_SIZE);
     setMessages([
       {
         id: nextId(),
@@ -565,8 +617,24 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto py-2">
-        {messages.map(msg => (
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto py-2"
+        onScroll={handleScrollMessages}
+      >
+        {/* Scroll-up pagination indicators */}
+        {hasMore && (
+          <div className="py-2 text-center text-xs text-gray-500">
+            Scroll up to load earlier messages
+          </div>
+        )}
+        {!hasMore && messages.length > PAGE_SIZE && (
+          <div className="py-2 text-center text-xs text-gray-700">
+            — Beginning of conversation —
+          </div>
+        )}
+
+        {visibleMessages.map(msg => (
           <ChatMessageComponent key={msg.id} message={msg} />
         ))}
         {isStreaming && (
