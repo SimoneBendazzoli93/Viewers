@@ -42,27 +42,60 @@ export function AgentConfigPanel({ config, onSave, onClose }: Props) {
   const fetchOllamaModels = useCallback(async () => {
     setOllamaLoading(true);
     setOllamaError(null);
+
+    const endpoint = `${local.backendUrl}/api/ollama/models`;
+    const headers: Record<string, string> = {};
+    if (local.apiKey) {
+      headers['Authorization'] = `Bearer ${local.apiKey}`;
+    }
+
+    console.group('[AI Assist] fetchOllamaModels');
+    console.log('Endpoint:', endpoint);
+    console.log('Headers:', { ...headers, Authorization: headers.Authorization ? 'Bearer ***' : undefined });
+    console.log('window.location.origin:', window.location.origin);
+
     try {
-      const url = new URL(`${local.backendUrl}/api/ollama/models`);
-      const headers: Record<string, string> = {};
-      if (local.apiKey) {
-        headers['Authorization'] = `Bearer ${local.apiKey}`;
-      }
+      const url = new URL(endpoint);
+      console.log('Parsed URL:', url.toString(), '| protocol:', url.protocol);
+
       const resp = await fetch(url.toString(), { headers });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      console.log('Response status:', resp.status, resp.statusText);
+      console.log('Response headers:', Object.fromEntries(resp.headers.entries()));
+
+      if (!resp.ok) {
+        const body = await resp.text();
+        console.error('Non-OK response body:', body);
+        throw new Error(`HTTP ${resp.status} ${resp.statusText}: ${body.slice(0, 200)}`);
+      }
+
       const data = await resp.json();
+      console.log('Response data:', data);
+
       const models: LLMModelOption[] = (data.models ?? []).map((m: { id: string; name: string; description?: string }) => ({
         id: m.id,
         name: m.name,
         provider: 'ollama' as LLMProvider,
         description: m.description,
       }));
+      console.log('Parsed models:', models);
+      console.groupEnd();
+
       setOllamaModels(models);
       if (models.length > 0 && !models.find(m => m.id === local.llmModel)) {
         setLocal(prev => ({ ...prev, llmModel: models[0].id }));
       }
     } catch (err: unknown) {
-      setOllamaError(err instanceof Error ? err.message : 'Could not reach Ollama server');
+      const isTypeError = err instanceof TypeError;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('Fetch error:', err);
+      console.error('Error type:', isTypeError ? 'TypeError (network/CORS/mixed-content)' : typeof err);
+      console.error('Error message:', message);
+      console.groupEnd();
+
+      const hint = isTypeError
+        ? ` (Possible causes: backend not running at "${local.backendUrl}", CORS not configured, or HTTPS→HTTP mixed content)`
+        : '';
+      setOllamaError(`${message}${hint}`);
       setOllamaModels([]);
     } finally {
       setOllamaLoading(false);

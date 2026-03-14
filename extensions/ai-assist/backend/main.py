@@ -91,15 +91,25 @@ async def _fetch_ollama_models(base_url: str, api_key: str | None = None) -> lis
     The server is expected to return {"object": "list", "data": [{"id": "...", ...}]}.
     Returns an empty list if the server is unreachable.
     """
+    target_url = f"{base_url.rstrip('/')}/models"
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+        headers["Authorization"] = f"Bearer {api_key[:8]}***"  # log truncated key
+
+    logger.info("Fetching Ollama models from: %s | auth: %s", target_url, "yes" if api_key else "no")
+
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"  # restore full key for actual request
+
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(f"{base_url.rstrip('/')}/models", headers=headers)
+            resp = await client.get(target_url, headers=headers)
+            logger.info("Ollama /models response: HTTP %d", resp.status_code)
+            logger.debug("Ollama /models response headers: %s", dict(resp.headers))
             resp.raise_for_status()
             data = resp.json()
-            return [
+            logger.debug("Ollama /models raw body: %s", data)
+            models = [
                 {
                     "id": m["id"],
                     "name": m["id"],
@@ -108,8 +118,21 @@ async def _fetch_ollama_models(base_url: str, api_key: str | None = None) -> lis
                 }
                 for m in data.get("data", [])
             ]
+            logger.info("Ollama returned %d model(s)", len(models))
+            return models
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "Ollama /models HTTP error: %d %s | body: %s",
+            exc.response.status_code,
+            exc.response.reason_phrase,
+            exc.response.text[:500],
+        )
+        return []
+    except httpx.RequestError as exc:
+        logger.error("Ollama /models network error: %s — %s", type(exc).__name__, exc)
+        return []
     except Exception as exc:
-        logger.warning("Could not reach Ollama at %s: %s", base_url, exc)
+        logger.error("Ollama /models unexpected error: %s — %s", type(exc).__name__, exc)
         return []
 
 
@@ -126,13 +149,24 @@ async def ollama_models(
     - Passes the `Authorization` request header to Ollama (Bearer token).
     """
     url = base_url or settings.ollama_base_url
+    logger.info("ollama_models endpoint called | base_url param=%r | using url=%s", base_url, url)
+    logger.info("Authorization header present: %s", "yes" if authorization else "no")
+
     api_key = None
     if authorization and authorization.lower().startswith("bearer "):
         api_key = authorization[7:]
+        logger.info("Using API key from request Authorization header (len=%d)", len(api_key))
     elif not authorization:
         api_key = settings.ollama_api_key
+        logger.info(
+            "No Authorization header — using OLLAMA_API_KEY from settings: %s",
+            "set" if api_key else "not set",
+        )
+    else:
+        logger.warning("Authorization header present but not Bearer scheme: %r", authorization[:20])
 
     models = await _fetch_ollama_models(url, api_key)
+    logger.info("Returning %d model(s) to client", len(models))
     return {"models": models, "base_url": url}
 
 
