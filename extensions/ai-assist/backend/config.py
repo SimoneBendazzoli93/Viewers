@@ -37,9 +37,11 @@ class Settings(BaseSettings):
     azure_openai_endpoint: str | None = None
     azure_openai_api_version: str = "2024-02-01"
 
-    # Ollama — set OLLAMA_BASE_URL to a remote server if needed
-    # e.g. https://maia-chat.app.cloud.cbh.kth.se/api
-    ollama_base_url: str = "http://localhost:11434"
+    # Base URL for an OpenAI-compatible Ollama server.
+    # Local Ollama:  http://localhost:11434/v1
+    # Remote server: https://maia-chat.app.cloud.cbh.kth.se/api
+    # The /models and /chat/completions paths are appended automatically.
+    ollama_base_url: str = "http://localhost:11434/v1"
     # Optional Bearer token for remote Ollama servers that require authentication
     ollama_api_key: str | None = None
 

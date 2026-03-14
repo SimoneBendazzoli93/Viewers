@@ -65,19 +65,22 @@ def create_llm(
         )
 
     elif provider == "ollama":
+        # The Ollama server exposes an OpenAI-compatible API, so we use
+        # ChatOpenAI with the configured base URL.
+        # For local Ollama:  OLLAMA_BASE_URL=http://localhost:11434/v1
+        # For remote server: OLLAMA_BASE_URL=https://host/api
         try:
-            from langchain_ollama import ChatOllama
+            from langchain_openai import ChatOpenAI
         except ImportError:
-            raise ValueError("langchain-ollama is not installed.")
-        resolved_key = api_key or settings.ollama_api_key
-        kwargs: dict = dict(
+            raise ValueError("langchain-openai is not installed.")
+        resolved_key = api_key or settings.ollama_api_key or "ollama"
+        return ChatOpenAI(
             model=model,
             temperature=temperature,
+            streaming=streaming,
             base_url=settings.ollama_base_url,
+            api_key=resolved_key,
         )
-        if resolved_key:
-            kwargs["headers"] = {"Authorization": f"Bearer {resolved_key}"}
-        return ChatOllama(**kwargs)
 
     elif provider == "openrouter":
         # OpenRouter uses the OpenAI-compatible API

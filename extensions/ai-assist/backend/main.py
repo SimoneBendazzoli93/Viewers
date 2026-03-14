@@ -87,27 +87,26 @@ async def health():
 
 async def _fetch_ollama_models(base_url: str, api_key: str | None = None) -> list[dict]:
     """
-    Query an Ollama server's /api/tags endpoint and return a list of model dicts.
-    Returns an empty list (with an error entry) if the server is unreachable.
+    Query an OpenAI-compatible /models endpoint and return a list of model dicts.
+    The server is expected to return {"object": "list", "data": [{"id": "...", ...}]}.
+    Returns an empty list if the server is unreachable.
     """
-    headers = {}
+    headers: dict[str, str] = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(f"{base_url.rstrip('/')}/api/tags", headers=headers)
+            resp = await client.get(f"{base_url.rstrip('/')}/models", headers=headers)
             resp.raise_for_status()
             data = resp.json()
             return [
                 {
-                    "id": m["name"],
-                    "name": m["name"],
+                    "id": m["id"],
+                    "name": m["id"],
                     "provider": "ollama",
-                    "description": f"Size: {m.get('size', 0) // 1_000_000_000:.1f} GB"
-                    if m.get("size")
-                    else "Ollama model",
+                    "description": m.get("description", ""),
                 }
-                for m in data.get("models", [])
+                for m in data.get("data", [])
             ]
     except Exception as exc:
         logger.warning("Could not reach Ollama at %s: %s", base_url, exc)
