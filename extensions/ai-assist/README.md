@@ -76,11 +76,26 @@ In any viewer mode (Basic, Segmentation, etc.), click the **AI** tab in the righ
 |-------------|-------------------------------------|-----------------------|
 | OpenAI      | gpt-4o, gpt-4o-mini                | `OPENAI_API_KEY`      |
 | Anthropic   | claude-opus-4-6, claude-sonnet-4-6 | `ANTHROPIC_API_KEY`   |
-| Ollama      | llama3.2, mistral, …               | Local Ollama server   |
+| Ollama      | Fetched live from your server      | `OLLAMA_BASE_URL` (+ optional `OLLAMA_API_KEY`) |
 | OpenRouter  | Any model via OpenRouter           | `OPENROUTER_API_KEY`  |
-| Azure       | Your deployed model                | Azure credentials     |
+| Azure       | Your deployed model                | `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT` |
 
 Configure via the **⚙ Settings** button in the panel, or via backend environment variables.
+
+#### Ollama
+
+The extension communicates with Ollama through an **OpenAI-compatible API** (`/models` and `/chat/completions`). Set `OLLAMA_BASE_URL` to the base URL of your server:
+
+```bash
+# Local Ollama
+OLLAMA_BASE_URL=http://localhost:11434/v1
+
+# Remote / hosted Ollama with authentication
+OLLAMA_BASE_URL=https://my-ollama-server.example.com/api
+OLLAMA_API_KEY=my-bearer-token
+```
+
+Available models are **fetched live** from the server when you select the Ollama provider in Settings — no hardcoded model list.
 
 ### Segmentation Models
 
@@ -132,21 +147,25 @@ The default is `/tmp/ohif-ai-chat-history`. The directory is created automatical
 
 ## Backend Environment Variables
 
-| Variable                  | Default        | Description                         |
-|---------------------------|----------------|-------------------------------------|
-| `OPENAI_API_KEY`          | —              | OpenAI API key                      |
-| `ANTHROPIC_API_KEY`       | —              | Anthropic API key                   |
-| `OPENROUTER_API_KEY`      | —              | OpenRouter API key                  |
-| `DEFAULT_LLM_PROVIDER`    | `openai`       | Default LLM provider                |
-| `DEFAULT_LLM_MODEL`       | `gpt-4o`       | Default model name                  |
-| `DEFAULT_SEGMENTATION_MODEL` | `totalsegmentator` | Active segmentation model    |
-| `OLLAMA_BASE_URL`         | `http://localhost:11434` | Ollama server URL         |
-| `CUSTOM_SEG_ENDPOINTS`    | —              | `id:url` pairs, comma-separated     |
-| `TOTALSEGMENTATOR_TASK`   | `total`        | TotalSegmentator task               |
-| `TOTALSEGMENTATOR_FAST`   | `false`        | Use fast mode                       |
-| `CHAT_HISTORY_DIR`        | `/tmp/ohif-ai-chat-history` | Directory for server-side chat history files |
-| `PORT`                    | `8000`         | Backend server port                 |
-| `DEBUG`                   | `false`        | Enable debug logging                |
+| Variable                      | Default                        | Description                                     |
+|-------------------------------|--------------------------------|-------------------------------------------------|
+| `OPENAI_API_KEY`              | —                              | OpenAI API key                                  |
+| `ANTHROPIC_API_KEY`           | —                              | Anthropic API key                               |
+| `OPENROUTER_API_KEY`          | —                              | OpenRouter API key                              |
+| `AZURE_OPENAI_API_KEY`        | —                              | Azure OpenAI API key                            |
+| `AZURE_OPENAI_ENDPOINT`       | —                              | Azure OpenAI endpoint URL                       |
+| `AZURE_OPENAI_API_VERSION`    | `2024-02-01`                   | Azure OpenAI API version                        |
+| `OLLAMA_BASE_URL`             | `http://localhost:11434/v1`    | Ollama server base URL (OpenAI-compatible)      |
+| `OLLAMA_API_KEY`              | —                              | Bearer token for remote Ollama servers          |
+| `DEFAULT_LLM_PROVIDER`        | `openai`                       | Default LLM provider                            |
+| `DEFAULT_LLM_MODEL`           | `gpt-4o`                       | Default model name                              |
+| `DEFAULT_SEGMENTATION_MODEL`  | `totalsegmentator`             | Active segmentation model                       |
+| `CUSTOM_SEG_ENDPOINTS`        | —                              | `id:url` pairs, comma-separated                 |
+| `TOTALSEGMENTATOR_TASK`       | `total`                        | TotalSegmentator task                           |
+| `TOTALSEGMENTATOR_FAST`       | `false`                        | Use fast mode for TotalSegmentator              |
+| `CHAT_HISTORY_DIR`            | `/tmp/ohif-ai-chat-history`    | Directory for server-side chat history files    |
+| `PORT`                        | `8000`                         | Backend server port                             |
+| `DEBUG`                       | `false`                        | Enable debug logging                            |
 
 ---
 
@@ -187,7 +206,19 @@ data: [DONE]
 
 ### `GET /api/models`
 
-Returns available LLM and segmentation models.
+Returns available LLM models (static cloud providers + live Ollama models) and segmentation models.
+
+### `GET /api/ollama/models?base_url=<url>`
+
+Probes an Ollama server and returns its model list. Used by the Settings panel to populate the model dropdown dynamically.
+
+- `base_url` query param overrides the configured `OLLAMA_BASE_URL` so you can test connectivity before saving.
+- Forwards the request's `Authorization: Bearer <token>` header to the Ollama server.
+
+**Response:**
+```json
+{"models": [{"id": "qwen3:32b", "name": "qwen3:32b", "provider": "ollama"}], "base_url": "https://..."}
+```
 
 ### `GET /api/chat/history/{study_uid}`
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import type { ChatMessage as ChatMessageType } from '../types';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface Props {
   message: ChatMessageType;
@@ -62,7 +63,11 @@ export function ChatMessage({ message }: Props) {
             AI Assistant
           </div>
         )}
-        <div className="whitespace-pre-wrap">{message.content}</div>
+        {isUser ? (
+          <div className="whitespace-pre-wrap text-sm">{message.content}</div>
+        ) : (
+          <MarkdownRenderer content={message.content} />
+        )}
         <div
           className={`mt-1 text-right text-xs opacity-60 ${
             isUser ? 'text-primary-foreground' : 'text-muted-foreground'
