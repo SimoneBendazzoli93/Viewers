@@ -294,11 +294,8 @@ def convert_dicom_seg_to_nifti(
         volumes_ml = {}
         for label, path in masks.items():
             mask = sitk.ReadImage(path)
-            volume = mask.GetSpacing()[0] * mask.GetSpacing()[1] * mask.GetSpacing()[2] * np.sum(mask) / 1000.0
+            volume = mask.GetSpacing()[0] * mask.GetSpacing()[1] * mask.GetSpacing()[2] * np.sum(sitk.GetArrayFromImage(mask)) / 1000.0
             volumes_ml[label] = volume
-            #logger.info(f"Volume of {label}: {volume} ml")
-            #logger.info(f"Number of voxels: {np.sum(mask)}")
-           # logger.info(f"Voxel volume: {mask.GetSpacing()[0] * mask.GetSpacing()[1] * mask.GetSpacing()[2]} mm^3")
     except Exception as exc:
         logger.exception("DICOM SEG conversion error")
         return json.dumps({"error": f"Conversion failed: {exc}"})
