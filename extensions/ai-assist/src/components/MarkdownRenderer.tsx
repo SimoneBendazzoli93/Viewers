@@ -2,13 +2,13 @@
  * Lightweight markdown renderer for AI chat messages.
  *
  * Supported syntax:
- *   Block:  # H1  ## H2  ### H3  ---  - list  1. list  ```lang … ```
+ *   Block:  # H1  ## H2  ### H3  ---  - list  1. list  ```lang … ```  | table |
  *   Inline: **bold**  *italic*  `inline code`
  *
  * No external dependencies — intentionally minimal to avoid adding packages.
  * Handles partial/streaming content gracefully (no crashes on unclosed fences).
  */
-import React from 'react';
+import React, { useState } from 'react';
 
 // ── Inline renderer ──────────────────────────────────────────────────────────
 
@@ -37,6 +37,95 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode {
         return part || null;
       })}
     </>
+  );
+}
+
+// ── Table renderer ───────────────────────────────────────────────────────────
+
+/** Split a `| a | b | c |` line into trimmed cell strings. */
+function parseTableRow(line: string): string[] {
+  return line
+    .split('|')
+    .slice(1, -1)          // drop the empty strings before first | and after last |
+    .map(c => c.trim());
+}
+
+/** True for separator rows like `|---|:---:|------|`. */
+function isSeparatorRow(cells: string[]): boolean {
+  return cells.length > 0 && cells.every(c => /^:?-+:?$/.test(c));
+}
+
+function TableBlock({ rows, blockKey }: { rows: string[][]; blockKey: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const colCount = rows[0]?.length ?? 0;
+
+  // Normalize every row to the same column count
+  const normalised = rows.map(r => {
+    if (r.length >= colCount) return r.slice(0, colCount);
+    return [...r, ...Array(colCount - r.length).fill('')];
+  });
+
+  const headers = normalised[0];
+  const dataRows = normalised.slice(1);
+
+  const handleCopyCSV = () => {
+    const escape = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const csv = normalised
+      .map(row => row.map(escape).join(','))
+      .join('\n');
+    navigator.clipboard.writeText(csv).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div className="my-2">
+      <div className="mb-1 flex justify-end">
+        <button
+          onClick={handleCopyCSV}
+          className="rounded border border-gray-600 bg-gray-800 px-2 py-0.5 text-xs text-gray-400 hover:bg-gray-700 hover:text-white active:bg-gray-600"
+          title="Copy table as CSV"
+        >
+          {copied ? '✓ Copied' : 'Copy CSV'}
+        </button>
+      </div>
+
+      <div className="overflow-x-auto rounded border border-gray-600">
+        <table className="w-full border-collapse text-xs">
+          <thead>
+            <tr className="bg-gray-700">
+              {headers.map((h, ci) => (
+                <th
+                  key={`${blockKey}-h${ci}`}
+                  className="border border-gray-600 px-2 py-1.5 text-left font-semibold text-gray-100"
+                >
+                  {renderInline(h, `${blockKey}-h${ci}`)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {dataRows.map((row, ri) => (
+              <tr
+                key={`${blockKey}-r${ri}`}
+                className={ri % 2 === 0 ? 'bg-gray-800' : 'bg-gray-850'}
+              >
+                {row.map((cell, ci) => (
+                  <td
+                    key={`${blockKey}-r${ri}c${ci}`}
+                    className="border border-gray-700 px-2 py-1 text-gray-300"
+                  >
+                    {renderInline(cell, `${blockKey}-r${ri}c${ci}`)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -109,6 +198,24 @@ function parseLines(text: string, baseKey: string): React.ReactNode[] {
       continue;
     }
 
+    // Markdown table — collect all consecutive pipe-starting lines
+    if (trimmed.startsWith('|')) {
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        tableLines.push(lines[i].trim());
+        i++;
+      }
+      // Parse rows, discarding separator lines (|---|---|)
+      const rows = tableLines
+        .map(parseTableRow)
+        .filter(cells => cells.length > 0 && !isSeparatorRow(cells));
+      if (rows.length >= 1) {
+        const tableKey = k();
+        nodes.push(<TableBlock key={tableKey} rows={rows} blockKey={tableKey} />);
+      }
+      continue;
+    }
+
     // Unordered list — consume consecutive list lines
     if (/^[-*]\s/.test(trimmed)) {
       const items: string[] = [];
@@ -150,7 +257,7 @@ function parseLines(text: string, baseKey: string): React.ReactNode[] {
     while (
       i < lines.length &&
       lines[i].trim() !== '' &&
-      !/^(#{1,3}|-{3,}|[-*]\s|\d+[.)]\s)/.test(lines[i].trim())
+      !/^(#{1,3}|-{3,}|[-*]\s|\d+[.)]\s|\|)/.test(lines[i].trim())
     ) {
       paraLines.push(lines[i]);
       i++;
