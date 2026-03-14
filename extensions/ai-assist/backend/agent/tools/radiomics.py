@@ -241,6 +241,8 @@ def extract_radiomics(
             f"Extracted {total_features} radiomics features for "
             f"{len(per_segment)} segment(s) ({mask_source}): "
             f"{', '.join(per_segment.keys())}. "
-            f"Full results in CSV (download_url). Key highlights included."
+            f"The complete feature set has been saved to a CSV file — "
+            f"the user can download it via the download button shown on the tool card. "
+            f"Key highlights per segment are provided below for your summary."
         ),
     })

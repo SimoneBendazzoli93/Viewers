@@ -13,8 +13,10 @@ import React, { useState } from 'react';
 // ── Inline renderer ──────────────────────────────────────────────────────────
 
 function renderInline(text: string, keyPrefix: string): React.ReactNode {
-  // Split on **bold**, *italic*, `code` — all must be non-empty
-  const parts = text.split(/(\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`)/g);
+  // Split on **bold**, *italic*, `code`, [link](url) — all must be non-empty
+  const parts = text.split(
+    /(\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`|\[[^\]\n]+\]\([^)\n]+\))/g
+  );
   return (
     <>
       {parts.map((part, i) => {
@@ -32,6 +34,21 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode {
             >
               {part.slice(1, -1)}
             </code>
+          );
+        }
+        // [label](href) — open in new tab so the viewer stays open
+        const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+        if (linkMatch) {
+          return (
+            <a
+              key={`${keyPrefix}-a${i}`}
+              href={linkMatch[2]}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-400 underline hover:text-blue-300"
+            >
+              {linkMatch[1]}
+            </a>
           );
         }
         return part || null;

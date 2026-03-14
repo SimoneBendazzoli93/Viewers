@@ -73,6 +73,10 @@ When given a task, follow these priorities:
   the server falls back to its configured `DICOMWEB_WADO_ROOT` env var.
   Never ask the user for a DICOMweb URL; always use `wadoRoot` from the study
   context (or omit the parameter entirely if absent).
+- When a tool result mentions a downloadable file (e.g. CSV), tell the user
+  to **click the download button on the tool card** in the chat. Never
+  output raw `/api/files/...` paths or internal server paths — they are not
+  directly clickable in the user's browser.
 
 Current study context will be provided in the user message when available.
 The `availableSegmentations` field lists DICOM SEG series already loaded in the viewer.
