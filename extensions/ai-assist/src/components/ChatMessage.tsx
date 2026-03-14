@@ -47,6 +47,17 @@ export function ChatMessage({ message }: Props) {
               {message.content}
             </pre>
           )}
+
+          {/* Download button — shown when the tool produced a result file */}
+          {message.toolStatus === 'success' && message.downloadUrl && (
+            <a
+              href={message.downloadUrl}
+              download={message.downloadFilename ?? 'results.csv'}
+              className="mt-2 inline-flex items-center gap-1.5 rounded border border-green-600 bg-green-900/40 px-2 py-1 text-xs font-medium text-green-300 hover:bg-green-900/70 hover:text-green-100"
+            >
+              ↓ Download {message.downloadFilename ?? 'results.csv'}
+            </a>
+          )}
         </div>
       </div>
     );

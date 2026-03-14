@@ -16,9 +16,9 @@ from typing import Optional
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, Header, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from config import settings
@@ -299,6 +299,43 @@ async def list_models():
                 })
 
     return {"llm": llm_models, "segmentation": seg_models}
+
+
+@app.get("/api/files/download")
+async def download_file(path: str = Query(..., description="Absolute path to the file on the server")):
+    """
+    Serve a result file (CSV, NIfTI, JSON, …) produced by an agent tool.
+
+    Security: only paths that are strict children of the configured output
+    directories are served. Anything outside those dirs returns 403.
+    """
+    file_path = Path(path).resolve()
+
+    allowed_dirs = [
+        settings.radiomics_output_dir.resolve(),
+        settings.segmentation_output_dir.resolve(),
+    ]
+    if not any(str(file_path).startswith(str(d)) for d in allowed_dirs):
+        raise HTTPException(status_code=403, detail="Access to this path is not allowed.")
+
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    # Determine media type from suffix
+    suffix = file_path.suffix.lower()
+    media_types = {
+        ".csv":     "text/csv",
+        ".json":    "application/json",
+        ".nii":     "application/octet-stream",
+        ".gz":      "application/octet-stream",
+    }
+    media_type = media_types.get(suffix, "application/octet-stream")
+
+    return FileResponse(
+        path=str(file_path),
+        filename=file_path.name,
+        media_type=media_type,
+    )
 
 
 @app.post("/api/chat/stream")

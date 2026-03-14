@@ -8,6 +8,10 @@ export interface ChatMessage {
   toolResult?: string;
   /** Elapsed-time string injected by tool_progress events while the tool runs. */
   toolProgress?: string;
+  /** Full URL to a downloadable result file produced by the tool (e.g. CSV). */
+  downloadUrl?: string;
+  /** Human-readable filename shown on the download button. */
+  downloadFilename?: string;
 }
 
 export type ChatHistoryStorage = 'localStorage' | 'sessionStorage' | 'none' | 'server';
