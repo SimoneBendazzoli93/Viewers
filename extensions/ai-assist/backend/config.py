@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     # Directory where radiomics results are saved
     radiomics_output_dir: Path = Path("/tmp/ohif-ai-radiomics-output")
 
+    # Directory where generated radiology reports are saved
+    # Each study gets versioned Markdown files: <dir>/<studyUID>/v001_YYYYMMDD_HHMMSS.md
+    reports_output_dir: Path = Path("/tmp/ohif-ai-reports-output")
+
     # TotalSegmentator task (see TotalSegmentator docs)
     totalsegmentator_task: str = "total"
     totalsegmentator_fast: bool = False  # use --fast flag for quicker (lower quality) inference
@@ -106,4 +110,5 @@ settings = Settings()
 settings.dicom_cache_dir.mkdir(parents=True, exist_ok=True)
 settings.segmentation_output_dir.mkdir(parents=True, exist_ok=True)
 settings.radiomics_output_dir.mkdir(parents=True, exist_ok=True)
+settings.reports_output_dir.mkdir(parents=True, exist_ok=True)
 settings.chat_history_dir.mkdir(parents=True, exist_ok=True)

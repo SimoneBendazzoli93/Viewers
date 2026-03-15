@@ -13,8 +13,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import AsyncIterator, Optional
+
+logger = logging.getLogger("ohif-ai-assist.agent")
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langgraph.prebuilt import create_react_agent
@@ -87,6 +92,30 @@ When given a task, follow these priorities:
 Current study context will be provided in the user message when available.
 The `availableSegmentations` field lists DICOM SEG series already loaded in the viewer.
 """
+
+
+def _save_report(study_uid: str, content: str) -> tuple[Path, int]:
+    """
+    Persist *content* as a versioned Markdown file under
+    ``reports_output_dir / study_uid /``.
+
+    Versioning is sequential: count existing ``v[0-9][0-9][0-9]_*.md`` files
+    and use ``len + 1`` as the new version.  The filename also embeds the
+    current timestamp so reports are self-identifying on disk.
+
+    Returns:
+        (filepath, version_number)
+    """
+    study_dir = settings.reports_output_dir / study_uid
+    study_dir.mkdir(parents=True, exist_ok=True)
+
+    existing = sorted(study_dir.glob("v[0-9][0-9][0-9]_*.md"))
+    version = len(existing) + 1
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filepath = study_dir / f"v{version:03d}_{timestamp}.md"
+    filepath.write_text(content, encoding="utf-8")
+    logger.info("Saved report v%d for study %s → %s", version, study_uid, filepath)
+    return filepath, version
 
 
 def _build_tools(segmentation_model: str) -> list:
@@ -197,8 +226,9 @@ async def stream_agent_response(
     # Using a dict avoids needing `nonlocal` inside nested async functions.
     state = {
         "final_answer": "",
-        "tool_running": False,   # True while a tool thread is executing
-        "tool_start_time": 0.0,  # monotonic time when the current tool started
+        "tool_running": False,    # True while a tool thread is executing
+        "tool_start_time": 0.0,   # monotonic time when the current tool started
+        "report_study_uid": None, # set when generate_radiology_report is invoked
     }
 
     # SSE events are funnelled through this queue so the heartbeat and the
@@ -228,6 +258,12 @@ async def stream_agent_response(
                     state["tool_start_time"] = time.monotonic()
                     tool_name = event.get("name", "tool")
                     tool_input = data.get("input", {})
+                    # Remember the study UID so we can save the final report.
+                    if tool_name == "generate_radiology_report":
+                        state["report_study_uid"] = (
+                            tool_input.get("study_instance_uid")
+                            or (study_context or {}).get("studyInstanceUID")
+                        )
                     await queue.put(_sse({
                         "type": "tool_start",
                         "toolName": tool_name,
@@ -300,6 +336,24 @@ async def stream_agent_response(
             pass
 
     yield _sse({"type": "final", "content": state["final_answer"]})
+
+    # Persist the report and notify the frontend.
+    # The save happens after the final event so the user already sees the text;
+    # the report_saved event triggers a refetch that reveals the Reports tab.
+    if state.get("report_study_uid") and state["final_answer"].strip():
+        try:
+            filepath, version = _save_report(
+                state["report_study_uid"], state["final_answer"]
+            )
+            yield _sse({
+                "type": "report_saved",
+                "content": "",
+                "filename": filepath.name,
+                "version": version,
+            })
+        except Exception as exc:
+            logger.error("Failed to save report: %s", exc)
+
     yield "data: [DONE]\n\n"
 
 

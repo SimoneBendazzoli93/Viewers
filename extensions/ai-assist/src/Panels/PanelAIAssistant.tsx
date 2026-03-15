@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useSystem } from '@ohif/core';
-import type { ChatHistoryStorage, ChatMessage, AgentConfig, StreamMessage, DicomWebContext } from '../types';
+import type { ChatHistoryStorage, ChatMessage, AgentConfig, ReportEntry, StreamMessage, DicomWebContext } from '../types';
 import { AIAgentService } from '../services/AIAgentService';
 import { ChatMessage as ChatMessageComponent } from '../components/ChatMessage';
 import { StreamingMessage, type StreamingMessageHandle } from '../components/StreamingMessage';
 import { AgentConfigPanel } from '../components/AgentConfigPanel';
 import { QuickActionBar } from '../components/QuickActionBar';
 import { RadiomicsTable } from '../components/RadiomicsTable';
+import { ReportsPanel } from '../components/ReportsPanel';
 
 // Singleton service instance
 const agentService = new AIAgentService();
@@ -190,16 +191,18 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const [backendStatus, setBackendStatus] = useState<'unknown' | 'ok' | 'error'>('unknown');
 
   // ── Radiomics tab ─────────────────────────────────────────────────────────
-  // When a radiomics CSV exists on the backend for the current study, a second
-  // tab appears. radiomicsRefetchTick increments to force a re-check after an
-  // extraction completes without having to change activeStudyUID.
-  const [activeTab, setActiveTab] = useState<'chat' | 'radiomics'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'radiomics' | 'reports'>('chat');
   const [radiomicsData, setRadiomicsData] = useState<string | null>(null);
   const [radiomicsRefetchTick, setRadiomicsRefetchTick] = useState(0);
-  // Ref so handleStreamEvent ([] deps) can trigger a refetch + auto-switch.
   const triggerRadiomicsRefetchRef = useRef<() => void>(() => {});
-  // Signals that the next successful fetch should auto-switch to the radiomics tab.
   const pendingAutoSwitchRef = useRef(false);
+
+  // ── Reports tab ───────────────────────────────────────────────────────────
+  // reportsList is empty-array (no tab) until at least one report exists.
+  const [reportsList, setReportsList] = useState<ReportEntry[]>([]);
+  const [reportsRefetchTick, setReportsRefetchTick] = useState(0);
+  const triggerReportsRefetchRef = useRef<() => void>(() => {});
+  const pendingAutoSwitchToReportsRef = useRef(false);
 
   // How many messages (counting from the newest) are currently rendered.
   // Scrolling up past the top of the list loads the previous PAGE_SIZE chunk.
@@ -213,10 +216,14 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const activeStudyUIDRef = useRef<string | null>(activeStudyUID);
   activeStudyUIDRef.current = activeStudyUID;
 
-  // Keep the refetch callback current on every render (stable ref, latest fn).
+  // Keep refetch callbacks current on every render (stable refs, latest fns).
   triggerRadiomicsRefetchRef.current = () => {
     pendingAutoSwitchRef.current = true;
     setRadiomicsRefetchTick(t => t + 1);
+  };
+  triggerReportsRefetchRef.current = () => {
+    pendingAutoSwitchToReportsRef.current = true;
+    setReportsRefetchTick(t => t + 1);
   };
   const serverSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const browserSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -247,6 +254,13 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   // Scroll height snapshotted just before a "load more" render so we can
   // compute how much the content grew and adjust scrollTop accordingly.
   const prevScrollHeightRef = useRef(0);
+
+  // Stable callback passed to ReportsPanel for lazy content fetching.
+  const fetchReportContent = useCallback(
+    (filename: string) =>
+      agentService.fetchReportContent(activeStudyUID ?? '', filename),
+    [activeStudyUID]
+  );
 
   // Slice of the full messages array that is currently rendered.
   // While streaming, hide the empty placeholder — <StreamingMessage> is shown instead.
@@ -420,14 +434,14 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
     setDisplayCount(PAGE_SIZE);
   }, [activeStudyUID]);
 
-  // ── Radiomics: reset when the active study changes ────────────────────────
+  // ── Reset both data tabs when the active study changes ───────────────────
   useEffect(() => {
     setActiveTab('chat');
     setRadiomicsData(null);
+    setReportsList([]);
   }, [activeStudyUID]);
 
-  // ── Radiomics: fetch CSV from backend whenever study or tick changes ───────
-  // On study load we silently check; after extraction we auto-switch to the tab.
+  // ── Radiomics: fetch CSV whenever study or tick changes ──────────────────
   useEffect(() => {
     if (!activeStudyUID) return;
     agentService.fetchRadiomics(activeStudyUID).then(data => {
@@ -438,6 +452,18 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
       }
     });
   }, [activeStudyUID, radiomicsRefetchTick]);
+
+  // ── Reports: fetch list whenever study or tick changes ───────────────────
+  useEffect(() => {
+    if (!activeStudyUID) return;
+    agentService.fetchReports(activeStudyUID).then(list => {
+      setReportsList(list);
+      if (list.length > 0 && pendingAutoSwitchToReportsRef.current) {
+        setActiveTab('reports');
+        pendingAutoSwitchToReportsRef.current = false;
+      }
+    });
+  }, [activeStudyUID, reportsRefetchTick]);
 
   // Check backend health on mount and after config change
   useEffect(() => {
@@ -631,13 +657,18 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
             return updated;
           });
 
-          // If a radiomics tool just finished, re-fetch the CSV and auto-switch
-          // to the Radiomics tab once the data is available.
+          // Re-fetch radiomics CSV if a radiomics tool just completed.
           if (event.toolName?.toLowerCase().includes('radiomics')) {
             triggerRadiomicsRefetchRef.current();
           }
           break;
         }
+
+        case 'report_saved':
+          // A new report was saved on the backend — refresh the reports list
+          // and auto-switch to the Reports tab.
+          triggerReportsRefetchRef.current();
+          break;
 
         case 'action':
           break; // no displayable content
@@ -796,22 +827,30 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
         </span>
       </div>
 
-      {/* Tab bar — only shown when a radiomics CSV exists for this study */}
-      {radiomicsData !== null && (
+      {/* Tab bar — shown whenever at least one non-chat tab has data */}
+      {(radiomicsData !== null || reportsList.length > 0) && (
         <div className="flex border-b border-gray-700 px-3">
-          {(['chat', 'radiomics'] as const).map(tab => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`mr-4 border-b-2 py-1.5 text-xs font-medium capitalize transition-colors ${
-                activeTab === tab
-                  ? 'border-blue-500 text-blue-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-300'
-              }`}
-            >
-              {tab === 'radiomics' ? 'Radiomics' : 'Chat'}
-            </button>
-          ))}
+          {(
+            [
+              { id: 'chat',     label: 'Chat' },
+              { id: 'reports',  label: 'Reports',  hidden: reportsList.length === 0 },
+              { id: 'radiomics',label: 'Radiomics', hidden: radiomicsData === null },
+            ] as { id: 'chat' | 'reports' | 'radiomics'; label: string; hidden?: boolean }[]
+          )
+            .filter(t => !t.hidden)
+            .map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`mr-4 border-b-2 py-1.5 text-xs font-medium transition-colors ${
+                  activeTab === tab.id
+                    ? 'border-blue-500 text-blue-400'
+                    : 'border-transparent text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
         </div>
       )}
 
@@ -896,6 +935,20 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
           </p>
         </div>
       </div>
+
+      {/* ── Reports panel ────────────────────────────────────────────────── */}
+      {reportsList.length > 0 && (
+        <div
+          className={
+            activeTab === 'reports' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'
+          }
+        >
+          <ReportsPanel
+            reports={reportsList}
+            fetchContent={fetchReportContent}
+          />
+        </div>
+      )}
 
       {/* ── Radiomics panel ───────────────────────────────────────────────── */}
       {radiomicsData !== null && (

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from datetime import datetime
 from typing import Optional
 
 import httpx
@@ -305,6 +306,66 @@ async def list_models():
                 })
 
     return {"llm": llm_models, "segmentation": seg_models}
+
+
+@app.get("/api/reports/{study_uid}")
+async def list_reports(study_uid: str):
+    """
+    Return a list of all saved radiology reports for a study, newest first.
+
+    Reports are stored at:
+        {reports_output_dir}/{study_uid}/v{NNN}_{YYYYMMDD_HHMMSS}.md
+
+    Each entry contains the version number, filename, creation time (from
+    mtime), and file size in bytes.  Returns an empty list (not 404) when no
+    reports exist yet so the frontend can safely poll.
+    """
+    study_dir = settings.reports_output_dir / study_uid
+    if not study_dir.is_dir():
+        return {"reports": []}
+
+    reports = []
+    for md_file in sorted(
+        study_dir.glob("v[0-9][0-9][0-9]_*.md"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    ):
+        stem = md_file.stem                        # e.g. "v003_20240115_143022"
+        version = int(stem.split("_")[0][1:])      # "v003" → 3
+        stat = md_file.stat()
+        reports.append({
+            "version": version,
+            "filename": md_file.name,
+            "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            "size": stat.st_size,
+        })
+
+    return {"reports": reports}
+
+
+@app.get("/api/reports/{study_uid}/{filename}")
+async def get_report(study_uid: str, filename: str):
+    """
+    Return the Markdown content of a specific report version.
+
+    Security:
+      - ``filename`` must end in ``.md`` and contain no path separators.
+      - The resolved path must stay within ``reports_output_dir``.
+    """
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+    if not filename.endswith(".md"):
+        raise HTTPException(status_code=400, detail="Only .md report files are served here.")
+
+    report_file = (settings.reports_output_dir / study_uid / filename).resolve()
+    if not str(report_file).startswith(str(settings.reports_output_dir.resolve())):
+        raise HTTPException(status_code=403, detail="Access denied.")
+    if not report_file.exists():
+        raise HTTPException(status_code=404, detail="Report not found.")
+
+    content = report_file.read_text(encoding="utf-8")
+    logger.info("Serving report %s for study %s", filename, study_uid)
+    return {"content": content, "filename": filename, "study_uid": study_uid}
 
 
 @app.get("/api/radiomics/{study_uid}")

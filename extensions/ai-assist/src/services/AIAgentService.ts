@@ -1,4 +1,4 @@
-import type { AgentConfig, ChatMessage, StreamMessage } from '../types';
+import type { AgentConfig, ChatMessage, ReportEntry, StreamMessage } from '../types';
 
 const DEFAULT_CONFIG: AgentConfig = {
   backendUrl: 'http://localhost:8000',
@@ -179,6 +179,44 @@ export class AIAgentService {
       });
     } catch {
       // silently ignore
+    }
+  }
+
+  /**
+   * List all saved radiology reports for a study.
+   * Returns an empty array when none exist (the backend never returns 404 here).
+   *
+   * Backend endpoint: GET /api/reports/{studyUID}
+   */
+  async fetchReports(studyUID: string): Promise<ReportEntry[]> {
+    try {
+      const resp = await fetch(
+        `${this.config.backendUrl}/api/reports/${encodeURIComponent(studyUID)}`
+      );
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.reports ?? []) as ReportEntry[];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Fetch the Markdown content of a specific report version.
+   * Returns null when the file is not found or a network error occurs.
+   *
+   * Backend endpoint: GET /api/reports/{studyUID}/{filename}
+   */
+  async fetchReportContent(studyUID: string, filename: string): Promise<string | null> {
+    try {
+      const resp = await fetch(
+        `${this.config.backendUrl}/api/reports/${encodeURIComponent(studyUID)}/${encodeURIComponent(filename)}`
+      );
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      return (data.content as string) ?? null;
+    } catch {
+      return null;
     }
   }
 

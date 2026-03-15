@@ -69,8 +69,20 @@ export interface AgentAction {
   parameters?: Record<string, unknown>;
 }
 
+/** One entry in the list returned by GET /api/reports/{studyUID}. */
+export interface ReportEntry {
+  /** Sequential version number starting at 1, newest = highest. */
+  version: number;
+  /** Filename on the server, e.g. "v003_20240115_143022.md". */
+  filename: string;
+  /** ISO-8601 creation timestamp (from file mtime). */
+  created_at: string;
+  /** File size in bytes. */
+  size: number;
+}
+
 export interface StreamMessage {
-  type: 'thought' | 'action' | 'observation' | 'final' | 'error' | 'tool_start' | 'tool_end' | 'tool_progress';
+  type: 'thought' | 'action' | 'observation' | 'final' | 'error' | 'tool_start' | 'tool_end' | 'tool_progress' | 'report_saved';
   content: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
