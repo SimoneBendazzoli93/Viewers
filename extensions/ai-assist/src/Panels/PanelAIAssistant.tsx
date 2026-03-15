@@ -561,26 +561,20 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
           break;
 
         case 'tool_end': {
-          // Parse the tool output for an optional download_url produced by
-          // result-generating tools such as extract_radiomics.
+          // event.downloadUrl is a server-relative path set by result-generating
+          // tools (e.g. extract_radiomics). Build the full URL and derive the filename.
           let downloadUrl: string | undefined;
           let downloadFilename: string | undefined;
-          try {
-            const parsed = JSON.parse(event.toolOutput ?? '{}');
-            if (parsed.download_url) {
-              const backendUrl = agentService.getConfig().backendUrl.replace(/\/$/, '');
-              downloadUrl = `${backendUrl}${parsed.download_url}`;
-              // Extract filename from the query-string "path" param
-              try {
-                const urlObj = new URL(downloadUrl);
-                const filePath = urlObj.searchParams.get('path') ?? '';
-                downloadFilename = filePath.split('/').pop() || 'download';
-              } catch {
-                downloadFilename = 'download';
-              }
+          if (event.downloadUrl) {
+            const backendUrl = agentService.getConfig().backendUrl.replace(/\/$/, '');
+            downloadUrl = `${backendUrl}${event.downloadUrl}`;
+            try {
+              const urlObj = new URL(downloadUrl);
+              const filePath = urlObj.searchParams.get('path') ?? '';
+              downloadFilename = filePath.split('/').pop() || 'download';
+            } catch {
+              downloadFilename = 'download';
             }
-          } catch {
-            // non-JSON output or no download_url — no button
           }
 
           // Update the last running tool message to success/error.

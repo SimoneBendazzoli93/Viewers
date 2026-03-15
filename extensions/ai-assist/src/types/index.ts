@@ -77,4 +77,6 @@ export interface StreamMessage {
   toolOutput?: string;
   /** Seconds elapsed since the current tool started (present on tool_progress events). */
   elapsed?: number;
+  /** Server-relative download path for result files produced by a tool (e.g. CSV). */
+  downloadUrl?: string;
 }

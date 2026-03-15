@@ -239,17 +239,22 @@ async def stream_agent_response(
                     state["tool_running"] = False
                     tool_name = event.get("name", "tool")
                     tool_output = data.get("output", "")
+                    download_url: str | None = None
                     try:
                         parsed = json.loads(tool_output)
                         display = parsed.get("message", tool_output)
+                        download_url = parsed.get("download_url")
                     except Exception:
                         display = str(tool_output)[:500]
-                    await queue.put(_sse({
+                    sse_payload: dict = {
                         "type": "tool_end",
                         "toolName": tool_name,
                         "toolOutput": display,
                         "content": display,
-                    }))
+                    }
+                    if download_url:
+                        sse_payload["downloadUrl"] = download_url
+                    await queue.put(_sse(sse_payload))
 
                 elif kind == "on_chat_model_end":
                     output = data.get("output")
