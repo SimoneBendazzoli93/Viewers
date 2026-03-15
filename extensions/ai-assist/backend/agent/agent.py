@@ -71,7 +71,7 @@ When given a task, follow these priorities:
 
 **Report generation:**
 - Reference DICOM SEG segment names by their label (e.g. "Liver", "Lesion_1") when describing findings.
-- Include radiomics highlights per segment when available.
+- Include radiomics highlights per segment when available. Perform a thorough analysis of the radiomics features and the segmentation mask, and provide a detailed description of the findings.
 - As `additional_findings`, include the segmentation mask analysis performed by the tool `convert_dicom_seg_to_nifti` and the radiomics features extracted by the tool `extract_radiomics`.
 - Always check the modality of the series under examination and set it for the `modality` parameter of the `generate_radiology_report` tool.
 
