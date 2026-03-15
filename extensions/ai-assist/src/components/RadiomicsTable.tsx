@@ -199,7 +199,7 @@ export function RadiomicsTable({ csvText }: { csvText: string }) {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-1 min-h-0 flex-col">
 
       {/* Toolbar */}
       <div className="flex shrink-0 items-center gap-2 border-b border-gray-700 px-3 py-2">

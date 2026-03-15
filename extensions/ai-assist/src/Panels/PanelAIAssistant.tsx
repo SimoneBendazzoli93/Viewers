@@ -784,7 +784,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
 
   if (showConfig) {
     return (
-      <div className="flex h-full flex-col bg-gray-900 text-white">
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-gray-900 text-white">
         <AgentConfigPanel
           config={config}
           onSave={handleSaveConfig}
@@ -795,9 +795,9 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   }
 
   return (
-    <div className="flex h-full flex-col bg-gray-900 text-white">
+    <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-gray-900 text-white">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-gray-700 px-3 py-2">
+      <div className="flex shrink-0 items-center justify-between border-b border-gray-700 px-3 py-2">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold">AI Assistant</span>
           <span
@@ -836,7 +836,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
       </div>
 
       {/* LLM + model info bar */}
-      <div className="flex items-center gap-2 border-b border-gray-800 bg-gray-850 px-3 py-1">
+      <div className="flex shrink-0 items-center gap-2 border-b border-gray-800 bg-gray-850 px-3 py-1">
         <span className="text-xs text-gray-500">
           {config.llmProvider} / {config.llmModel}
         </span>
@@ -848,7 +848,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
 
       {/* Tab bar — shown whenever at least one non-chat tab has data */}
       {(radiomicsData !== null || reportsList.length > 0) && (
-        <div className="flex border-b border-gray-700 px-3">
+        <div className="flex shrink-0 border-b border-gray-700 px-3">
           {(
             [
               { id: 'chat',     label: 'Chat' },
@@ -933,7 +933,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
         <QuickActionBar onAction={handleSend} disabled={isStreaming} />
 
         {/* Input area */}
-        <div className="border-t border-gray-700 px-2 py-2">
+        <div className="shrink-0 border-t border-gray-700 px-2 py-2">
           <div className="flex items-end gap-2">
             <textarea
               ref={inputRef}

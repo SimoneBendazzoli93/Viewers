@@ -68,7 +68,7 @@ export function ReportsPanel({ reports, selectedFilename, onSelectFilename, cont
   const selected = reports.find(r => r.filename === selectedFilename) ?? reports[0];
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-1 min-h-0 flex-col">
       {/* ── Version selector + copy button ─────────────────────────────── */}
       <div className="flex items-center gap-2 border-b border-gray-700 px-3 py-2">
         <select

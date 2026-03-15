@@ -53,7 +53,7 @@ interface Props {
 
 export function QuickActionBar({ onAction, disabled }: Props) {
   return (
-    <div className="flex flex-wrap gap-1 border-t border-gray-700 px-2 py-2">
+    <div className="flex shrink-0 flex-wrap gap-1 border-t border-gray-700 px-2 py-2">
       {QUICK_ACTIONS.map(action => (
         <button
           key={action.id}
