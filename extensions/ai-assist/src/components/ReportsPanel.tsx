@@ -41,6 +41,13 @@ export function ReportsPanel({ reports, fetchContent }: Props) {
   const [copied, setCopied] = useState(false);
   const prevLengthRef = useRef(reports.length);
 
+  // Keep a ref to the latest fetchContent so the fetch effect never needs
+  // it in its dependency array. Without this, any re-render that produces a
+  // new fetchContent reference (even identical in behaviour) cancels the
+  // in-flight fetch and restarts it, leaving the panel stuck on "Loading…".
+  const fetchContentRef = useRef(fetchContent);
+  fetchContentRef.current = fetchContent;
+
   // When the reports list grows (new report saved), jump to the newest entry.
   useEffect(() => {
     if (reports.length > prevLengthRef.current && reports[0]) {
@@ -57,19 +64,21 @@ export function ReportsPanel({ reports, fetchContent }: Props) {
   }, [reports, selectedFilename]);
 
   // Fetch content whenever the selection changes.
+  // Uses fetchContentRef (not the prop directly) so that a new function
+  // reference from a parent re-render never cancels an in-flight fetch.
   useEffect(() => {
     if (!selectedFilename) return;
     let cancelled = false;
     setLoading(true);
     setContent(null);
-    fetchContent(selectedFilename).then(c => {
+    fetchContentRef.current(selectedFilename).then(c => {
       if (!cancelled) {
         setContent(c);
         setLoading(false);
       }
     });
     return () => { cancelled = true; };
-  }, [selectedFilename, fetchContent]);
+  }, [selectedFilename]); // intentionally omits fetchContent — see fetchContentRef above
 
   const handleCopy = useCallback(async () => {
     if (!content) return;
