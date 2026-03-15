@@ -2,10 +2,15 @@
 OHIF AI Assistant Backend
 
 FastAPI application providing:
-  POST /api/chat/stream       – streaming chat endpoint (SSE)
-  GET  /api/models            – list all available LLM and segmentation models
-  GET  /api/ollama/models     – probe an Ollama server and return its model list
-  GET  /health                – health check
+  POST /api/chat/stream            – streaming chat endpoint (SSE)
+  GET  /api/chat/history/{uid}     – load persisted chat history
+  POST /api/chat/history/{uid}     – save chat history
+  DELETE /api/chat/history/{uid}   – delete chat history
+  GET  /api/radiomics/{study_uid}  – return the latest radiomics CSV for a study (404 if none)
+  GET  /api/models                 – list all available LLM and segmentation models
+  GET  /api/ollama/models          – probe an Ollama server and return its model list
+  GET  /api/files/download?path=…  – serve a result file produced by an agent tool
+  GET  /health                     – health check
 """
 from __future__ import annotations
 
@@ -300,6 +305,39 @@ async def list_models():
                 })
 
     return {"llm": llm_models, "segmentation": seg_models}
+
+
+@app.get("/api/radiomics/{study_uid}")
+async def get_radiomics(study_uid: str):
+    """
+    Return the most recently generated radiomics CSV for a study.
+
+    The radiomics tool stores results at:
+        {radiomics_output_dir}/{study_uid}/{series_uid}/radiomics_features.csv
+
+    When multiple series extractions exist the most recently modified file is
+    returned.  Responds with 404 when no CSV has been generated yet.
+    """
+    study_dir = settings.radiomics_output_dir / study_uid
+    if not study_dir.is_dir():
+        raise HTTPException(status_code=404, detail="No radiomics results found for this study.")
+
+    # Collect all radiomics_features.csv files under any series subdirectory.
+    csv_files = sorted(
+        study_dir.glob("*/radiomics_features.csv"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not csv_files:
+        raise HTTPException(status_code=404, detail="No radiomics results found for this study.")
+
+    latest = csv_files[0]
+    logger.info("Serving radiomics CSV for study %s → %s", study_uid, latest)
+    return FileResponse(
+        path=str(latest),
+        filename="radiomics_features.csv",
+        media_type="text/csv",
+    )
 
 
 @app.get("/api/files/download")
