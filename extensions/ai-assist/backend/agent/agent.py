@@ -231,7 +231,15 @@ async def stream_agent_response(
         "tool_running": False,    # True while a tool thread is executing
         "tool_start_time": 0.0,   # monotonic time when the current tool started
         "report_study_uid": None, # set when generate_radiology_report is invoked
+        # Token buffering: accumulate LLM tokens before sending SSE events so
+        # the frontend receives larger, evenly-spaced chunks rather than a
+        # rapid trickle of single-character events.
+        "text_buffer": "",
+        "text_buffer_ts": 0.0,    # monotonic time of the last buffer flush
     }
+    # Flush the text buffer after this many chars or seconds (whichever comes first).
+    TEXT_BUFFER_CHARS = 50
+    TEXT_FLUSH_INTERVAL = 0.25   # seconds
 
     # SSE events are funnelled through this queue so the heartbeat and the
     # agent event loop can both produce output concurrently.
@@ -253,7 +261,15 @@ async def stream_agent_response(
                     if chunk and hasattr(chunk, "content") and chunk.content:
                         token = chunk.content
                         state["final_answer"] += token
-                        await queue.put(_sse({"type": "observation", "content": token}))
+                        state["text_buffer"] += token
+                        now = time.monotonic()
+                        if (
+                            len(state["text_buffer"]) >= TEXT_BUFFER_CHARS
+                            or (now - state["text_buffer_ts"]) >= TEXT_FLUSH_INTERVAL
+                        ):
+                            await queue.put(_sse({"type": "observation", "content": state["text_buffer"]}))
+                            state["text_buffer"] = ""
+                            state["text_buffer_ts"] = now
 
                 elif kind == "on_tool_start":
                     state["tool_running"] = True
@@ -300,6 +316,10 @@ async def stream_agent_response(
                         state["final_answer"] = output.content
 
         finally:
+            # Flush any tokens that didn't reach the chunk threshold.
+            if state["text_buffer"]:
+                await queue.put(_sse({"type": "observation", "content": state["text_buffer"]}))
+                state["text_buffer"] = ""
             # Signal the consumer that we're done regardless of how we exited.
             await queue.put(None)
 
