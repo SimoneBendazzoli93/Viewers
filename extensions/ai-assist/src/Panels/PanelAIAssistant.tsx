@@ -204,6 +204,12 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const triggerReportsRefetchRef = useRef<() => void>(() => {});
   const pendingAutoSwitchToReportsRef = useRef(false);
 
+  // ── Lazy mount flags ──────────────────────────────────────────────────────
+  // Heavy panels are not mounted until the user first visits the tab.
+  // Once set to true they stay true for the lifetime of the current study.
+  const [hasVisitedRadiomics, setHasVisitedRadiomics] = useState(false);
+  const [hasVisitedReports, setHasVisitedReports] = useState(false);
+
   // How many messages (counting from the newest) are currently rendered.
   // Scrolling up past the top of the list loads the previous PAGE_SIZE chunk.
   const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
@@ -439,6 +445,8 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
     setActiveTab('chat');
     setRadiomicsData(null);
     setReportsList([]);
+    setHasVisitedRadiomics(false);
+    setHasVisitedReports(false);
   }, [activeStudyUID]);
 
   // ── Radiomics: fetch CSV whenever study or tick changes ──────────────────
@@ -447,6 +455,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
     agentService.fetchRadiomics(activeStudyUID).then(data => {
       setRadiomicsData(data);
       if (data && pendingAutoSwitchRef.current) {
+        setHasVisitedRadiomics(true);
         setActiveTab('radiomics');
         pendingAutoSwitchRef.current = false;
       }
@@ -459,6 +468,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
     agentService.fetchReports(activeStudyUID).then(list => {
       setReportsList(list);
       if (list.length > 0 && pendingAutoSwitchToReportsRef.current) {
+        setHasVisitedReports(true);
         setActiveTab('reports');
         pendingAutoSwitchToReportsRef.current = false;
       }
@@ -841,7 +851,11 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
             .map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  if (tab.id === 'radiomics') setHasVisitedRadiomics(true);
+                  if (tab.id === 'reports') setHasVisitedReports(true);
+                }}
                 className={`mr-4 border-b-2 py-1.5 text-xs font-medium transition-colors ${
                   activeTab === tab.id
                     ? 'border-blue-500 text-blue-400'
@@ -937,7 +951,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
       </div>
 
       {/* ── Reports panel ────────────────────────────────────────────────── */}
-      {reportsList.length > 0 && (
+      {reportsList.length > 0 && hasVisitedReports && (
         <div
           className={
             activeTab === 'reports' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'
@@ -951,7 +965,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
       )}
 
       {/* ── Radiomics panel ───────────────────────────────────────────────── */}
-      {radiomicsData !== null && (
+      {radiomicsData !== null && hasVisitedRadiomics && (
         <div
           className={
             activeTab === 'radiomics' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'
