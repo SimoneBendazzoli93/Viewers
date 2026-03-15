@@ -269,12 +269,25 @@ function parseLines(text: string, baseKey: string): React.ReactNode[] {
       continue;
     }
 
-    // Paragraph — collect consecutive non-special lines
+    // Paragraph — collect consecutive non-special lines.
+    //
+    // IMPORTANT: the stop-condition must mirror the outer if-checks exactly,
+    // otherwise a line can fall through every if-block AND exit this while
+    // immediately (paraLines stays empty, i never advances → infinite loop).
+    //
+    // Mismatches in the original code that caused the freeze:
+    //   #{1,3}   matched e.g. "#1 Findings:" which the heading check rejects
+    //            (it requires whitespace: /^(#{1,3})\s+/)
+    //   -{3,}    matched e.g. "--- Impression" which the HR check rejects
+    //            (it requires only dashes: /^-{3,}$/)
+    //
+    // Fix: use #{1,3}\s and -{3,}$ here so the condition matches the outer
+    // checks precisely.
     const paraLines: string[] = [];
     while (
       i < lines.length &&
       lines[i].trim() !== '' &&
-      !/^(#{1,3}|-{3,}|[-*]\s|\d+[.)]\s|\|)/.test(lines[i].trim())
+      !/^(#{1,3}\s|-{3,}$|[-*]\s|\d+[.)]\s|\|)/.test(lines[i].trim())
     ) {
       paraLines.push(lines[i]);
       i++;
@@ -291,6 +304,10 @@ function parseLines(text: string, baseKey: string): React.ReactNode[] {
           )}
         </p>
       );
+    } else {
+      // Safety net: if we still haven't consumed the current line (e.g. a
+      // future pattern gap), advance unconditionally to prevent an infinite loop.
+      i++;
     }
   }
 
