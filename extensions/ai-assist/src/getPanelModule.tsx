@@ -8,7 +8,7 @@ function getPanelModule({ commandsManager, extensionManager, servicesManager }):
       name: 'aiAssistant',
       iconName: 'tab-maia',
       iconLabel: 'AI',
-      label: 'MAIA Assistant',
+      label: 'MAIA Radiology Assistant',
       component: props => (
         <PanelAIAssistant
           {...props}

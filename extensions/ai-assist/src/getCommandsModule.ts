@@ -18,7 +18,7 @@ function getCommandsModule({ servicesManager, commandsManager }): Types.Commands
           }
 
           uiNotificationService?.show?.({
-            title: 'MAIA Assistant',
+            title: 'MAIA Radiology Assistant',
             message: 'Segmentation request sent to AI agent.',
             type: 'info',
             duration: 3000,
@@ -35,8 +35,9 @@ function getCommandsModule({ servicesManager, commandsManager }): Types.Commands
       generateAIReport: {
         commandFn: async () => {
           uiNotificationService?.show?.({
-            title: 'MAIA Assistant',
-            message: 'Report generation requested. Open the MAIA Assistant panel to view progress.',
+            title: 'MAIA Radiology Assistant',
+            message:
+              'Report generation requested. Open the MAIA Radiology Assistant panel to view progress.',
             type: 'info',
             duration: 4000,
           });
@@ -49,9 +50,9 @@ function getCommandsModule({ servicesManager, commandsManager }): Types.Commands
       extractAIRadiomics: {
         commandFn: async () => {
           uiNotificationService?.show?.({
-            title: 'MAIA Assistant',
+            title: 'MAIA Radiology Assistant',
             message:
-              'Radiomics extraction requested. Open the MAIA Assistant panel to view progress.',
+              'Radiomics extraction requested. Open the MAIA Radiology Assistant panel to view progress.',
             type: 'info',
             duration: 4000,
           });
@@ -68,7 +69,7 @@ function getCommandsModule({ servicesManager, commandsManager }): Types.Commands
             title: 'MAIA Backend',
             message: ok
               ? `Backend is online${version ? ` (v${version})` : ''}.`
-              : 'Backend is unreachable. Check configuration in the MAIA Assistant panel.',
+              : 'Backend is unreachable. Check configuration in the MAIA Radiology Assistant panel.',
             type: ok ? 'success' : 'error',
             duration: 4000,
           });
