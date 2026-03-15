@@ -203,6 +203,12 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const [reportsRefetchTick, setReportsRefetchTick] = useState(0);
   const triggerReportsRefetchRef = useRef<() => void>(() => {});
   const pendingAutoSwitchToReportsRef = useRef(false);
+  // Report content is fetched here (not in ReportsPanel) so it is decoupled
+  // from the panel's mount/unmount lifecycle entirely.
+  const [selectedReportFilename, setSelectedReportFilename] = useState<string | null>(null);
+  const [reportContent, setReportContent] = useState<string | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const prevReportsCountRef = useRef(0);
 
   // ── Lazy mount flags ──────────────────────────────────────────────────────
   // Heavy panels are not mounted until the user first visits the tab.
@@ -272,12 +278,6 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   // compute how much the content grew and adjust scrollTop accordingly.
   const prevScrollHeightRef = useRef(0);
 
-  // Stable callback passed to ReportsPanel for lazy content fetching.
-  const fetchReportContent = useCallback(
-    (filename: string) =>
-      agentService.fetchReportContent(activeStudyUID ?? '', filename),
-    [activeStudyUID]
-  );
 
   // Slice of the full messages array that is currently rendered.
   // While streaming, hide the empty placeholder — <StreamingMessage> is shown instead.
@@ -452,20 +452,21 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   }, [activeStudyUID]);
 
   // ── Reset both data tabs when the active study changes ───────────────────
-  // Guard: skip when activeStudyUID is null (transient during display-set
-  // updates, e.g. after a segmentation load) or when it returns to the same
-  // study it was before.  Without this guard, a DISPLAY_SETS_CHANGED event
-  // that briefly returns null from getActiveStudyUID causes reportsList to
-  // be cleared → ReportsPanel unmounts → in-flight fetch is cancelled →
-  // the panel is stuck on "Loading report…" because the auto-switch flag
-  // (pendingAutoSwitchToReportsRef) has already been consumed.
+  // Only fires when activeStudyUID changes to a genuinely different non-null
+  // value (i.e. the user opened a different study).  Transient nulls from
+  // DISPLAY_SETS_CHANGED events during segmentation loads are silently ignored
+  // so ongoing report fetches are never interrupted.
   useEffect(() => {
-    if (!activeStudyUID) return; // transient null — ignore
-    if (activeStudyUID === prevNonNullStudyUIDRef.current) return; // same study — ignore
+    if (!activeStudyUID) return;
+    if (activeStudyUID === prevNonNullStudyUIDRef.current) return;
     prevNonNullStudyUIDRef.current = activeStudyUID;
     setActiveTab('chat');
     setRadiomicsData(null);
     setReportsList([]);
+    setSelectedReportFilename(null);
+    setReportContent(null);
+    setReportLoading(false);
+    prevReportsCountRef.current = 0;
     setHasVisitedRadiomics(false);
     setHasVisitedReports(false);
   }, [activeStudyUID]);
@@ -495,6 +496,44 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
       }
     });
   }, [activeStudyUID, reportsRefetchTick]);
+
+  // ── Reports: auto-select newest report whenever the list grows ───────────
+  useEffect(() => {
+    if (reportsList.length === 0) {
+      setSelectedReportFilename(null);
+      prevReportsCountRef.current = 0;
+      return;
+    }
+    if (reportsList.length !== prevReportsCountRef.current) {
+      setSelectedReportFilename(reportsList[0].filename);
+      prevReportsCountRef.current = reportsList.length;
+    }
+  }, [reportsList]);
+
+  // ── Reports: fetch content whenever the selected report changes ──────────
+  // Uses activeStudyUIDRef (a ref, always current) rather than the
+  // activeStudyUID state so that this effect only re-runs when the selection
+  // actually changes — not when a transient null briefly replaces the UID.
+  // The fetch lives here (not in ReportsPanel) so it is completely decoupled
+  // from the panel's mount/unmount lifecycle.
+  useEffect(() => {
+    const studyUID = activeStudyUIDRef.current;
+    if (!selectedReportFilename || !studyUID) {
+      setReportContent(null);
+      setReportLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setReportLoading(true);
+    setReportContent(null);
+    agentService.fetchReportContent(studyUID, selectedReportFilename).then(c => {
+      if (!cancelled) {
+        setReportContent(c);
+        setReportLoading(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [selectedReportFilename]); // activeStudyUIDRef intentionally excluded (it's a ref)
 
   // Check backend health on mount and after config change
   useEffect(() => {
@@ -930,7 +969,10 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
         >
           <ReportsPanel
             reports={reportsList}
-            fetchContent={fetchReportContent}
+            selectedFilename={selectedReportFilename}
+            onSelectFilename={setSelectedReportFilename}
+            content={reportContent}
+            loading={reportLoading}
           />
         </div>
       )}

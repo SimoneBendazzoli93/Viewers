@@ -1,21 +1,28 @@
 /**
- * ReportsPanel
+ * ReportsPanel — pure display component.
  *
- * Displays saved radiology reports for the current study.
- * Reports are listed newest-first with sequential version IDs (v001, v002, …).
- * The selected report is rendered as Markdown via the shared MarkdownRenderer.
+ * All async fetching is owned by PanelAIAssistant, which passes the already-
+ * resolved content (or loading/error state) down as props.  This component
+ * has no effects and no async logic of its own, which makes it immune to the
+ * mount/unmount and stale-closure issues that plagued the previous design.
  *
  * Props:
- *   reports       – array of report metadata, newest first
- *   fetchContent  – async function that returns Markdown text for a filename
+ *   reports          – array of report metadata, newest first
+ *   selectedFilename – currently selected report filename (controlled)
+ *   onSelectFilename – callback when the user picks a different version
+ *   content          – Markdown text of the selected report, or null
+ *   loading          – true while the fetch is in progress
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import type { ReportEntry } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface Props {
   reports: ReportEntry[];
-  fetchContent: (filename: string) => Promise<string | null>;
+  selectedFilename: string | null;
+  onSelectFilename: (filename: string) => void;
+  content: string | null;
+  loading: boolean;
 }
 
 function formatDate(isoStr: string): string {
@@ -31,54 +38,8 @@ function formatDate(isoStr: string): string {
   }
 }
 
-export function ReportsPanel({ reports, fetchContent }: Props) {
-  // Track the selected report by filename so selection survives list updates.
-  const [selectedFilename, setSelectedFilename] = useState<string | null>(
-    reports[0]?.filename ?? null
-  );
-  const [content, setContent] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+export function ReportsPanel({ reports, selectedFilename, onSelectFilename, content, loading }: Props) {
   const [copied, setCopied] = useState(false);
-  const prevLengthRef = useRef(reports.length);
-
-  // Keep a ref to the latest fetchContent so the fetch effect never needs
-  // it in its dependency array. Without this, any re-render that produces a
-  // new fetchContent reference (even identical in behaviour) cancels the
-  // in-flight fetch and restarts it, leaving the panel stuck on "Loading…".
-  const fetchContentRef = useRef(fetchContent);
-  fetchContentRef.current = fetchContent;
-
-  // When the reports list grows (new report saved), jump to the newest entry.
-  useEffect(() => {
-    if (reports.length > prevLengthRef.current && reports[0]) {
-      setSelectedFilename(reports[0].filename);
-    }
-    prevLengthRef.current = reports.length;
-  }, [reports]);
-
-  // Ensure a valid selection whenever the list changes.
-  useEffect(() => {
-    if (!selectedFilename && reports[0]) {
-      setSelectedFilename(reports[0].filename);
-    }
-  }, [reports, selectedFilename]);
-
-  // Fetch content whenever the selection changes.
-  // Uses fetchContentRef (not the prop directly) so that a new function
-  // reference from a parent re-render never cancels an in-flight fetch.
-  useEffect(() => {
-    if (!selectedFilename) return;
-    let cancelled = false;
-    setLoading(true);
-    setContent(null);
-    fetchContentRef.current(selectedFilename).then(c => {
-      if (!cancelled) {
-        setContent(c);
-        setLoading(false);
-      }
-    });
-    return () => { cancelled = true; };
-  }, [selectedFilename]); // intentionally omits fetchContent — see fetchContentRef above
 
   const handleCopy = useCallback(async () => {
     if (!content) return;
@@ -112,7 +73,7 @@ export function ReportsPanel({ reports, fetchContent }: Props) {
       <div className="flex items-center gap-2 border-b border-gray-700 px-3 py-2">
         <select
           value={selectedFilename ?? ''}
-          onChange={e => setSelectedFilename(e.target.value)}
+          onChange={e => onSelectFilename(e.target.value)}
           className="min-w-0 flex-1 rounded border border-gray-600 bg-gray-800 px-2 py-1 text-xs text-white focus:border-blue-500 focus:outline-none"
         >
           {reports.map(r => (
