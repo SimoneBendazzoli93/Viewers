@@ -232,6 +232,7 @@ import StatusAlert from './Sources/StatusAlert';
 import Undo from './Sources/Undo';
 import TabContours from './Sources/TabContours';
 import IllustrationNotFound from './Sources/IllustrationNotFound';
+import TabMAIA from './Sources/TabMAIA';
 //
 //
 type IconProps = React.HTMLAttributes<SVGElement>;
@@ -681,6 +682,7 @@ export const Icons = {
   'tab-contours': (props: IconProps) => TabContours(props),
   TabContours: (props: IconProps) => TabContours(props),
   'tab-segmentation': (props: IconProps) => TabSegmentation(props),
+  'tab-maia': (props: IconProps) => TabMAIA(props),
   'tab-studies': (props: IconProps) => TabStudies(props),
   'tab-linear': (props: IconProps) => TabLinear(props),
   'tab-4d': (props: IconProps) => Tab4D(props),

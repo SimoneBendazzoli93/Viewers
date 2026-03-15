@@ -47,13 +47,13 @@ export const StreamingMessage = forwardRef<
   StreamingMessageHandle,
   { timestamp: Date; onUpdate?: () => void }
 >(function StreamingMessage({ timestamp, onUpdate }, ref) {
-  const textDivRef  = useRef<HTMLDivElement>(null);
+  const textDivRef = useRef<HTMLDivElement>(null);
   /** Text that has already been written to the DOM. */
-  const contentRef  = useRef<string>('');
+  const contentRef = useRef<string>('');
   /** Text received but not yet painted — drained by the RAF loop. */
-  const pendingRef  = useRef<string>('');
+  const pendingRef = useRef<string>('');
   /** requestAnimationFrame handle; null when the loop is idle. */
-  const rafRef      = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
   /** Stable ref so the drain closure always sees the latest onUpdate prop. */
   const onUpdateRef = useRef(onUpdate);
   onUpdateRef.current = onUpdate;
@@ -114,17 +114,17 @@ export const StreamingMessage = forwardRef<
   }, []);
 
   return (
-    <div className="flex justify-start mx-2 my-1">
-      <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-muted text-foreground">
+    <div className="mx-2 my-1 flex justify-start">
+      <div className="bg-muted text-foreground max-w-[85%] rounded-lg px-3 py-2 text-sm">
         <div className="text-muted-foreground mb-1 text-xs font-semibold uppercase tracking-wide">
-          AI Assistant
+          MAIA Radiology Assistant
         </div>
         {/* Content is written imperatively — starts empty, filled by the RAF drain loop. */}
         <div
           ref={textDivRef}
           className="whitespace-pre-wrap text-sm leading-relaxed"
         />
-        <div className="mt-1 text-right text-xs opacity-60 text-muted-foreground">
+        <div className="text-muted-foreground mt-1 text-right text-xs opacity-60">
           {formatTime(timestamp)}
         </div>
       </div>

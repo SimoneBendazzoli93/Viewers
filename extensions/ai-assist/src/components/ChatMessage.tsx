@@ -71,7 +71,7 @@ export const ChatMessage = React.memo(function ChatMessage({ message }: Props) {
       >
         {!isUser && (
           <div className="text-muted-foreground mb-1 text-xs font-semibold uppercase tracking-wide">
-            AI Assistant
+            MAIA Radiology Assistant
           </div>
         )}
         {isUser ? (

@@ -18,7 +18,7 @@ function getCommandsModule({ servicesManager, commandsManager }): Types.Commands
           }
 
           uiNotificationService?.show?.({
-            title: 'AI Assistant',
+            title: 'MAIA Assistant',
             message: 'Segmentation request sent to AI agent.',
             type: 'info',
             duration: 3000,
@@ -35,8 +35,8 @@ function getCommandsModule({ servicesManager, commandsManager }): Types.Commands
       generateAIReport: {
         commandFn: async () => {
           uiNotificationService?.show?.({
-            title: 'AI Assistant',
-            message: 'Report generation requested. Open the AI Assistant panel to view progress.',
+            title: 'MAIA Assistant',
+            message: 'Report generation requested. Open the MAIA Assistant panel to view progress.',
             type: 'info',
             duration: 4000,
           });
@@ -49,8 +49,9 @@ function getCommandsModule({ servicesManager, commandsManager }): Types.Commands
       extractAIRadiomics: {
         commandFn: async () => {
           uiNotificationService?.show?.({
-            title: 'AI Assistant',
-            message: 'Radiomics extraction requested. Open the AI Assistant panel to view progress.',
+            title: 'MAIA Assistant',
+            message:
+              'Radiomics extraction requested. Open the MAIA Assistant panel to view progress.',
             type: 'info',
             duration: 4000,
           });
@@ -64,10 +65,10 @@ function getCommandsModule({ servicesManager, commandsManager }): Types.Commands
         commandFn: async () => {
           const { ok, version } = await agentService.checkBackendHealth();
           uiNotificationService?.show?.({
-            title: 'AI Backend',
+            title: 'MAIA Backend',
             message: ok
               ? `Backend is online${version ? ` (v${version})` : ''}.`
-              : 'Backend is unreachable. Check configuration in the AI Assistant panel.',
+              : 'Backend is unreachable. Check configuration in the MAIA Assistant panel.',
             type: ok ? 'success' : 'error',
             duration: 4000,
           });
