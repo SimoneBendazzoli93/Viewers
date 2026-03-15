@@ -182,6 +182,25 @@ export class AIAgentService {
     }
   }
 
+  /**
+   * Fetch a previously-generated radiomics CSV for `studyUID` from the backend.
+   * Returns the raw CSV text if the file exists, or null when the backend
+   * responds with 404 (not yet generated) or an error occurs.
+   *
+   * Backend endpoint: GET /api/radiomics/{studyUID}
+   */
+  async fetchRadiomics(studyUID: string): Promise<string | null> {
+    try {
+      const resp = await fetch(
+        `${this.config.backendUrl}/api/radiomics/${encodeURIComponent(studyUID)}`
+      );
+      if (!resp.ok) return null;
+      return await resp.text();
+    } catch {
+      return null;
+    }
+  }
+
   async checkBackendHealth(): Promise<{ ok: boolean; version?: string }> {
     try {
       const resp = await fetch(`${this.config.backendUrl}/health`, { method: 'GET' });

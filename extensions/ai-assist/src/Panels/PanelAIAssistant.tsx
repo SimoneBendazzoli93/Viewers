@@ -6,6 +6,7 @@ import { ChatMessage as ChatMessageComponent } from '../components/ChatMessage';
 import { StreamingMessage, type StreamingMessageHandle } from '../components/StreamingMessage';
 import { AgentConfigPanel } from '../components/AgentConfigPanel';
 import { QuickActionBar } from '../components/QuickActionBar';
+import { RadiomicsTable } from '../components/RadiomicsTable';
 
 // Singleton service instance
 const agentService = new AIAgentService();
@@ -188,6 +189,18 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const [config, setConfig] = useState<AgentConfig>(agentService.getConfig());
   const [backendStatus, setBackendStatus] = useState<'unknown' | 'ok' | 'error'>('unknown');
 
+  // ── Radiomics tab ─────────────────────────────────────────────────────────
+  // When a radiomics CSV exists on the backend for the current study, a second
+  // tab appears. radiomicsRefetchTick increments to force a re-check after an
+  // extraction completes without having to change activeStudyUID.
+  const [activeTab, setActiveTab] = useState<'chat' | 'radiomics'>('chat');
+  const [radiomicsData, setRadiomicsData] = useState<string | null>(null);
+  const [radiomicsRefetchTick, setRadiomicsRefetchTick] = useState(0);
+  // Ref so handleStreamEvent ([] deps) can trigger a refetch + auto-switch.
+  const triggerRadiomicsRefetchRef = useRef<() => void>(() => {});
+  // Signals that the next successful fetch should auto-switch to the radiomics tab.
+  const pendingAutoSwitchRef = useRef(false);
+
   // How many messages (counting from the newest) are currently rendered.
   // Scrolling up past the top of the list loads the previous PAGE_SIZE chunk.
   const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
@@ -199,6 +212,12 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const streamingMessageIdRef = useRef<string | null>(null);
   const activeStudyUIDRef = useRef<string | null>(activeStudyUID);
   activeStudyUIDRef.current = activeStudyUID;
+
+  // Keep the refetch callback current on every render (stable ref, latest fn).
+  triggerRadiomicsRefetchRef.current = () => {
+    pendingAutoSwitchRef.current = true;
+    setRadiomicsRefetchTick(t => t + 1);
+  };
   const serverSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const browserSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -401,6 +420,25 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
     setDisplayCount(PAGE_SIZE);
   }, [activeStudyUID]);
 
+  // ── Radiomics: reset when the active study changes ────────────────────────
+  useEffect(() => {
+    setActiveTab('chat');
+    setRadiomicsData(null);
+  }, [activeStudyUID]);
+
+  // ── Radiomics: fetch CSV from backend whenever study or tick changes ───────
+  // On study load we silently check; after extraction we auto-switch to the tab.
+  useEffect(() => {
+    if (!activeStudyUID) return;
+    agentService.fetchRadiomics(activeStudyUID).then(data => {
+      setRadiomicsData(data);
+      if (data && pendingAutoSwitchRef.current) {
+        setActiveTab('radiomics');
+        pendingAutoSwitchRef.current = false;
+      }
+    });
+  }, [activeStudyUID, radiomicsRefetchTick]);
+
   // Check backend health on mount and after config change
   useEffect(() => {
     agentService.checkBackendHealth().then(({ ok }) => {
@@ -592,6 +630,12 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
             }
             return updated;
           });
+
+          // If a radiomics tool just finished, re-fetch the CSV and auto-switch
+          // to the Radiomics tab once the data is available.
+          if (event.toolName?.toLowerCase().includes('radiomics')) {
+            triggerRadiomicsRefetchRef.current();
+          }
           break;
         }
 
@@ -752,79 +796,117 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
         </span>
       </div>
 
-      {/* Messages */}
-      <div
-        ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto py-2"
-        onScroll={handleScrollMessages}
-      >
-        {/* Scroll-up pagination indicators */}
-        {hasMore && (
-          <div className="py-2 text-center text-xs text-gray-500">
-            Scroll up to load earlier messages
-          </div>
-        )}
-        {!hasMore && messages.length > PAGE_SIZE && (
-          <div className="py-2 text-center text-xs text-gray-700">
-            — Beginning of conversation —
-          </div>
-        )}
-
-        {visibleMessages.map(msg => (
-          <ChatMessageComponent key={msg.id} message={msg} />
-        ))}
-
-        {/* Streaming bubble — visible only while the agent is generating text.
-            Updates via direct DOM writes; never triggers a React re-render. */}
-        {isStreaming && streamingMessageIdRef.current && (
-          <StreamingMessage
-            ref={streamingMsgRef}
-            timestamp={streamingMsgTimestampRef.current}
-          />
-        )}
-
-        {isStreaming && (
-          <div className="mx-2 mt-1 flex items-center gap-2 text-xs text-gray-500">
-            <span className="animate-spin">⟳</span>
-            <span>Agent is thinking...</span>
+      {/* Tab bar — only shown when a radiomics CSV exists for this study */}
+      {radiomicsData !== null && (
+        <div className="flex border-b border-gray-700 px-3">
+          {(['chat', 'radiomics'] as const).map(tab => (
             <button
-              onClick={handleCancel}
-              className="ml-auto text-xs text-red-400 hover:text-red-300"
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`mr-4 border-b-2 py-1.5 text-xs font-medium capitalize transition-colors ${
+                activeTab === tab
+                  ? 'border-blue-500 text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-300'
+              }`}
             >
-              Cancel
+              {tab === 'radiomics' ? 'Radiomics' : 'Chat'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── Chat panel ─────────────────────────────────────────────────────
+          Kept in the DOM even when hidden so scroll position is preserved.  */}
+      <div
+        className={
+          activeTab === 'chat' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'
+        }
+      >
+        {/* Messages */}
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 overflow-y-auto py-2"
+          onScroll={handleScrollMessages}
+        >
+          {hasMore && (
+            <div className="py-2 text-center text-xs text-gray-500">
+              Scroll up to load earlier messages
+            </div>
+          )}
+          {!hasMore && messages.length > PAGE_SIZE && (
+            <div className="py-2 text-center text-xs text-gray-700">
+              — Beginning of conversation —
+            </div>
+          )}
+
+          {visibleMessages.map(msg => (
+            <ChatMessageComponent key={msg.id} message={msg} />
+          ))}
+
+          {/* Streaming bubble — updates via direct DOM writes, zero re-renders. */}
+          {isStreaming && streamingMessageIdRef.current && (
+            <StreamingMessage
+              ref={streamingMsgRef}
+              timestamp={streamingMsgTimestampRef.current}
+            />
+          )}
+
+          {isStreaming && (
+            <div className="mx-2 mt-1 flex items-center gap-2 text-xs text-gray-500">
+              <span className="animate-spin">⟳</span>
+              <span>Agent is thinking...</span>
+              <button
+                onClick={handleCancel}
+                className="ml-auto text-xs text-red-400 hover:text-red-300"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Quick actions */}
+        <QuickActionBar onAction={handleSend} disabled={isStreaming} />
+
+        {/* Input area */}
+        <div className="border-t border-gray-700 px-2 py-2">
+          <div className="flex items-end gap-2">
+            <textarea
+              ref={inputRef}
+              className="min-h-[40px] flex-1 resize-none rounded border border-gray-600 bg-gray-800 px-2 py-1.5 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+              placeholder="Ask about the study, request segmentation, report…"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              rows={2}
+              disabled={isStreaming}
+            />
+            <button
+              onClick={() => handleSend()}
+              disabled={isStreaming || !input.trim()}
+              className="rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40"
+              title="Send (Enter)"
+            >
+              ↑
             </button>
           </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Quick actions */}
-      <QuickActionBar onAction={handleSend} disabled={isStreaming} />
-
-      {/* Input area */}
-      <div className="border-t border-gray-700 px-2 py-2">
-        <div className="flex items-end gap-2">
-          <textarea
-            ref={inputRef}
-            className="min-h-[40px] flex-1 resize-none rounded border border-gray-600 bg-gray-800 px-2 py-1.5 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
-            placeholder="Ask about the study, request segmentation, report…"
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={2}
-            disabled={isStreaming}
-          />
-          <button
-            onClick={() => handleSend()}
-            disabled={isStreaming || !input.trim()}
-            className="rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40"
-            title="Send (Enter)"
-          >
-            ↑
-          </button>
+          <p className="mt-1 text-right text-xs text-gray-600">
+            Enter to send · Shift+Enter for newline
+          </p>
         </div>
-        <p className="mt-1 text-right text-xs text-gray-600">Enter to send · Shift+Enter for newline</p>
       </div>
+
+      {/* ── Radiomics panel ───────────────────────────────────────────────── */}
+      {radiomicsData !== null && (
+        <div
+          className={
+            activeTab === 'radiomics' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'
+          }
+        >
+          <RadiomicsTable csvText={radiomicsData} />
+        </div>
+      )}
     </div>
   );
 }
