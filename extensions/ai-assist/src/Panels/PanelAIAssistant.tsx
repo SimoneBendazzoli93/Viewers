@@ -1,6 +1,13 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useSystem } from '@ohif/core';
-import type { ChatHistoryStorage, ChatMessage, AgentConfig, ReportEntry, StreamMessage, DicomWebContext } from '../types';
+import type {
+  ChatHistoryStorage,
+  ChatMessage,
+  AgentConfig,
+  ReportEntry,
+  StreamMessage,
+  DicomWebContext,
+} from '../types';
 import { AIAgentService } from '../services/AIAgentService';
 import { ChatMessage as ChatMessageComponent } from '../components/ChatMessage';
 import { StreamingMessage, type StreamingMessageHandle } from '../components/StreamingMessage';
@@ -25,7 +32,7 @@ const WELCOME_MESSAGE: ChatMessage = {
   id: 'welcome',
   role: 'assistant',
   content:
-    'Hello! I am your AI radiology assistant. I can help you with:\n• Generating structured radiology reports\n• Running automatic organ segmentation\n• Extracting radiomics features\n• Answering questions about the current study\n\nUse the quick actions below or type a message to get started.',
+    'Hello! I am your MAIA radiology assistant. I can help you with:\n• Generating structured radiology reports\n• Running automatic organ segmentation\n• Extracting radiomics features\n• Answering questions about the current study\n\nUse the quick actions below or type a message to get started.',
   timestamp: new Date(),
 };
 
@@ -53,7 +60,11 @@ function loadHistory(studyUID: string | null, storageType: ChatHistoryStorage): 
   }
 }
 
-function saveHistory(studyUID: string | null, msgs: ChatMessage[], storageType: ChatHistoryStorage): void {
+function saveHistory(
+  studyUID: string | null,
+  msgs: ChatMessage[],
+  storageType: ChatHistoryStorage
+): void {
   const key = storageKey(studyUID);
   const storage = key ? getStorage(storageType) : null;
   if (!storage || !key) return;
@@ -89,7 +100,9 @@ function getActiveStudyUID(servicesManager: AppTypes.ServicesManager | undefined
  * Extract DICOMweb configuration from the active OHIF data source.
  * Returns null if the extension manager or data source is unavailable.
  */
-function getDicomWebContext(extensionManager: AppTypes.ExtensionManager | undefined): DicomWebContext | null {
+function getDicomWebContext(
+  extensionManager: AppTypes.ExtensionManager | undefined
+): DicomWebContext | null {
   try {
     if (!extensionManager) return null;
     const [dataSource] = extensionManager.getActiveDataSource?.() ?? [];
@@ -141,7 +154,8 @@ function buildStudyContext(
       .map(ds => ({
         seriesInstanceUID: ds.SeriesInstanceUID,
         seriesDescription: ds.SeriesDescription ?? '',
-        referencedSeriesInstanceUID: ds.referencedSeriesInstanceUID ?? ds.ReferencedSeriesInstanceUID ?? '',
+        referencedSeriesInstanceUID:
+          ds.referencedSeriesInstanceUID ?? ds.ReferencedSeriesInstanceUID ?? '',
       }));
 
     // DICOMweb configuration from the active data source
@@ -156,7 +170,8 @@ function buildStudyContext(
       modality: displaySet.Modality,
       // Spread DICOMweb fields at the top level — mirrors backend StudyContext model
       ...dicomWebCtx,
-      availableSegmentations: availableSegmentations.length > 0 ? availableSegmentations : undefined,
+      availableSegmentations:
+        availableSegmentations.length > 0 ? availableSegmentations : undefined,
     };
   } catch {
     return null;
@@ -277,7 +292,6 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   // Scroll height snapshotted just before a "load more" render so we can
   // compute how much the content grew and adjust scrollTop accordingly.
   const prevScrollHeightRef = useRef(0);
-
 
   // Slice of the full messages array that is currently rendered.
   // While streaming, hide the empty placeholder — <StreamingMessage> is shown instead.
@@ -532,7 +546,9 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
         setReportLoading(false);
       }
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [selectedReportFilename]); // activeStudyUIDRef intentionally excluded (it's a ref)
 
   // Check backend health on mount and after config change
@@ -613,9 +629,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
           streamingMsgRef.current?.reset();
           if (finalContent) {
             setMessages(prev =>
-              prev.map(m =>
-                m.id === assistantMsgId ? { ...m, content: finalContent } : m
-              )
+              prev.map(m => (m.id === assistantMsgId ? { ...m, content: finalContent } : m))
             );
           }
           setIsStreaming(false);
@@ -626,116 +640,113 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
     [input, isStreaming, messages, services]
   );
 
-  const handleStreamEvent = useCallback(
-    (event: StreamMessage, assistantMsgId: string) => {
-      switch (event.type) {
-        case 'thought':
-          // The "Agent is thinking…" spinner in the chat bar already covers this.
-          break;
+  const handleStreamEvent = useCallback((event: StreamMessage, assistantMsgId: string) => {
+    switch (event.type) {
+      case 'thought':
+        // The "Agent is thinking…" spinner in the chat bar already covers this.
+        break;
 
-        case 'final':
-          // The final event carries the authoritative complete text.
-          // Reset clears the pending queue + RAF, then appendText re-queues
-          // the full answer for a clean typewriter playback to completion.
-          streamingMsgRef.current?.reset();
-          streamingMsgRef.current?.appendText(event.content);
-          break;
+      case 'final':
+        // The final event carries the authoritative complete text.
+        // Reset clears the pending queue + RAF, then appendText re-queues
+        // the full answer for a clean typewriter playback to completion.
+        streamingMsgRef.current?.reset();
+        streamingMsgRef.current?.appendText(event.content);
+        break;
 
-        case 'tool_start':
-          // Add a tool-status message
-          setMessages(prev => [
-            ...prev,
-            {
-              id: nextId(),
-              role: 'tool',
-              content: event.toolInput ? JSON.stringify(event.toolInput, null, 2) : '',
-              toolName: event.toolName,
-              toolStatus: 'running',
-              timestamp: new Date(),
-            },
-          ]);
-          break;
+      case 'tool_start':
+        // Add a tool-status message
+        setMessages(prev => [
+          ...prev,
+          {
+            id: nextId(),
+            role: 'tool',
+            content: event.toolInput ? JSON.stringify(event.toolInput, null, 2) : '',
+            toolName: event.toolName,
+            toolStatus: 'running',
+            timestamp: new Date(),
+          },
+        ]);
+        break;
 
-        case 'tool_progress':
-          // Update the elapsed-time indicator on the last running tool message.
-          setMessages(prev => {
-            const updated = [...prev];
-            for (let i = updated.length - 1; i >= 0; i--) {
-              if (updated[i].role === 'tool' && updated[i].toolStatus === 'running') {
-                updated[i] = { ...updated[i], toolProgress: event.content };
-                break;
-              }
-            }
-            return updated;
-          });
-          break;
-
-        case 'tool_end': {
-          // event.downloadUrl is a server-relative path set by result-generating
-          // tools (e.g. extract_radiomics). Build the full URL and derive the filename.
-          let downloadUrl: string | undefined;
-          let downloadFilename: string | undefined;
-          if (event.downloadUrl) {
-            const backendUrl = agentService.getConfig().backendUrl.replace(/\/$/, '');
-            downloadUrl = `${backendUrl}${event.downloadUrl}`;
-            try {
-              const urlObj = new URL(downloadUrl);
-              const filePath = urlObj.searchParams.get('path') ?? '';
-              downloadFilename = filePath.split('/').pop() || 'download';
-            } catch {
-              downloadFilename = 'download';
+      case 'tool_progress':
+        // Update the elapsed-time indicator on the last running tool message.
+        setMessages(prev => {
+          const updated = [...prev];
+          for (let i = updated.length - 1; i >= 0; i--) {
+            if (updated[i].role === 'tool' && updated[i].toolStatus === 'running') {
+              updated[i] = { ...updated[i], toolProgress: event.content };
+              break;
             }
           }
+          return updated;
+        });
+        break;
 
-          // Update the last running tool message to success/error.
-          // toolResult is intentionally not stored — it is never rendered and
-          // can be very large (full radiomics JSON), which would bloat React
-          // state and slow down every subsequent JSON.stringify for storage.
-          setMessages(prev => {
-            const updated = [...prev];
-            for (let i = updated.length - 1; i >= 0; i--) {
-              if (updated[i].role === 'tool' && updated[i].toolStatus === 'running') {
-                updated[i] = {
-                  ...updated[i],
-                  toolStatus: event.type === 'tool_end' ? 'success' : 'error',
-                  ...(downloadUrl ? { downloadUrl, downloadFilename } : {}),
-                };
-                break;
-              }
-            }
-            return updated;
-          });
-
-          // Re-fetch radiomics CSV if a radiomics tool just completed.
-          if (event.toolName?.toLowerCase().includes('radiomics')) {
-            triggerRadiomicsRefetchRef.current();
+      case 'tool_end': {
+        // event.downloadUrl is a server-relative path set by result-generating
+        // tools (e.g. extract_radiomics). Build the full URL and derive the filename.
+        let downloadUrl: string | undefined;
+        let downloadFilename: string | undefined;
+        if (event.downloadUrl) {
+          const backendUrl = agentService.getConfig().backendUrl.replace(/\/$/, '');
+          downloadUrl = `${backendUrl}${event.downloadUrl}`;
+          try {
+            const urlObj = new URL(downloadUrl);
+            const filePath = urlObj.searchParams.get('path') ?? '';
+            downloadFilename = filePath.split('/').pop() || 'download';
+          } catch {
+            downloadFilename = 'download';
           }
-          break;
         }
 
-        case 'report_saved':
-          // A new report was saved on the backend — refresh the reports list
-          // and auto-switch to the Reports tab.
-          triggerReportsRefetchRef.current();
-          break;
-
-        case 'action':
-          break; // no displayable content
-
-        case 'observation':
-        default:
-          // Hand the token straight to the typewriter queue — no React state
-          // update, no re-render, no reconciliation. The RAF loop inside
-          // StreamingMessage drains at a smooth fixed rate and calls onUpdate
-          // (scroll) after each frame.
-          if (event.content) {
-            streamingMsgRef.current?.appendText(event.content);
+        // Update the last running tool message to success/error.
+        // toolResult is intentionally not stored — it is never rendered and
+        // can be very large (full radiomics JSON), which would bloat React
+        // state and slow down every subsequent JSON.stringify for storage.
+        setMessages(prev => {
+          const updated = [...prev];
+          for (let i = updated.length - 1; i >= 0; i--) {
+            if (updated[i].role === 'tool' && updated[i].toolStatus === 'running') {
+              updated[i] = {
+                ...updated[i],
+                toolStatus: event.type === 'tool_end' ? 'success' : 'error',
+                ...(downloadUrl ? { downloadUrl, downloadFilename } : {}),
+              };
+              break;
+            }
           }
-          break;
+          return updated;
+        });
+
+        // Re-fetch radiomics CSV if a radiomics tool just completed.
+        if (event.toolName?.toLowerCase().includes('radiomics')) {
+          triggerRadiomicsRefetchRef.current();
+        }
+        break;
       }
-    },
-    []
-  );
+
+      case 'report_saved':
+        // A new report was saved on the backend — refresh the reports list
+        // and auto-switch to the Reports tab.
+        triggerReportsRefetchRef.current();
+        break;
+
+      case 'action':
+        break; // no displayable content
+
+      case 'observation':
+      default:
+        // Hand the token straight to the typewriter queue — no React state
+        // update, no re-render, no reconciliation. The RAF loop inside
+        // StreamingMessage drains at a smooth fixed rate and calls onUpdate
+        // (scroll) after each frame.
+        if (event.content) {
+          streamingMsgRef.current?.appendText(event.content);
+        }
+        break;
+    }
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -774,9 +785,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
     streamingMsgRef.current?.reset();
     if (partialContent && streamingMessageIdRef.current) {
       const msgId = streamingMessageIdRef.current;
-      setMessages(prev =>
-        prev.map(m => (m.id === msgId ? { ...m, content: partialContent } : m))
-      );
+      setMessages(prev => prev.map(m => (m.id === msgId ? { ...m, content: partialContent } : m)));
     }
     agentService.cancelCurrentRequest();
     setIsStreaming(false);
@@ -784,7 +793,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
 
   if (showConfig) {
     return (
-      <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-gray-900 text-white">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-gray-900 text-white">
         <AgentConfigPanel
           config={config}
           onSave={handleSaveConfig}
@@ -795,11 +804,11 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   }
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-gray-900 text-white">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-gray-900 text-white">
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between border-b border-gray-700 px-3 py-2">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">AI Assistant</span>
+          <span className="text-sm font-semibold">MAIA Radiology Assistant</span>
           <span
             className={`inline-block h-2 w-2 rounded-full ${
               backendStatus === 'ok'
@@ -836,13 +845,15 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
       </div>
 
       {/* LLM + model info bar */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-gray-800 bg-gray-850 px-3 py-1">
+      <div className="bg-gray-850 flex shrink-0 items-center gap-2 border-b border-gray-800 px-3 py-1">
         <span className="text-xs text-gray-500">
           {config.llmProvider} / {config.llmModel}
         </span>
         <span className="text-gray-700">|</span>
         <span className="text-xs text-gray-500">
-          Seg: {config.segmentationModels.find(m => m.id === config.activeSegmentationModel)?.name ?? config.activeSegmentationModel}
+          Seg:{' '}
+          {config.segmentationModels.find(m => m.id === config.activeSegmentationModel)?.name ??
+            config.activeSegmentationModel}
         </span>
       </div>
 
@@ -851,9 +862,9 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
         <div className="flex shrink-0 border-b border-gray-700 px-3">
           {(
             [
-              { id: 'chat',     label: 'Chat' },
-              { id: 'reports',  label: 'Reports',  hidden: reportsList.length === 0 },
-              { id: 'radiomics',label: 'Radiomics', hidden: radiomicsData === null },
+              { id: 'chat', label: 'Chat' },
+              { id: 'reports', label: 'Reports', hidden: reportsList.length === 0 },
+              { id: 'radiomics', label: 'Radiomics', hidden: radiomicsData === null },
             ] as { id: 'chat' | 'reports' | 'radiomics'; label: string; hidden?: boolean }[]
           )
             .filter(t => !t.hidden)
@@ -879,11 +890,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
 
       {/* ── Chat panel ─────────────────────────────────────────────────────
           Kept in the DOM even when hidden so scroll position is preserved.  */}
-      <div
-        className={
-          activeTab === 'chat' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'
-        }
-      >
+      <div className={activeTab === 'chat' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
         {/* Messages */}
         <div
           ref={scrollContainerRef}
@@ -902,7 +909,10 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
           )}
 
           {visibleMessages.map(msg => (
-            <ChatMessageComponent key={msg.id} message={msg} />
+            <ChatMessageComponent
+              key={msg.id}
+              message={msg}
+            />
           ))}
 
           {/* Streaming bubble — typewriter via RAF, zero React re-renders. */}
@@ -930,7 +940,10 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
         </div>
 
         {/* Quick actions */}
-        <QuickActionBar onAction={handleSend} disabled={isStreaming} />
+        <QuickActionBar
+          onAction={handleSend}
+          disabled={isStreaming}
+        />
 
         {/* Input area */}
         <div className="shrink-0 border-t border-gray-700 px-2 py-2">
@@ -962,11 +975,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
 
       {/* ── Reports panel ────────────────────────────────────────────────── */}
       {reportsList.length > 0 && hasVisitedReports && (
-        <div
-          className={
-            activeTab === 'reports' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'
-          }
-        >
+        <div className={activeTab === 'reports' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
           <ReportsPanel
             reports={reportsList}
             selectedFilename={selectedReportFilename}
@@ -979,11 +988,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
 
       {/* ── Radiomics panel ───────────────────────────────────────────────── */}
       {radiomicsData !== null && hasVisitedRadiomics && (
-        <div
-          className={
-            activeTab === 'radiomics' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'
-          }
-        >
+        <div className={activeTab === 'radiomics' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
           <RadiomicsTable csvText={radiomicsData} />
         </div>
       )}
