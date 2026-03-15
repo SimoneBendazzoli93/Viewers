@@ -25,12 +25,12 @@ export const ChatMessage = React.memo(function ChatMessage({ message, overrideCo
     return (
       <div className="mx-2 my-1">
         <div
-          className={`rounded border px-3 py-2 text-xs font-mono ${
+          className={`rounded border px-3 py-2 font-mono text-xs ${
             message.toolStatus === 'error'
-              ? 'border-red-700 bg-red-950 text-red-300'
+              ? 'bg-red-950 border-red-700 text-red-300'
               : message.toolStatus === 'running'
-                ? 'border-yellow-700 bg-yellow-950 text-yellow-300'
-                : 'border-green-800 bg-green-950 text-green-300'
+                ? 'bg-yellow-950 border-yellow-700 text-yellow-300'
+                : 'bg-green-950 border-green-800 text-green-300'
           }`}
         >
           <div className="mb-1 flex items-center gap-2">
@@ -42,12 +42,8 @@ export const ChatMessage = React.memo(function ChatMessage({ message, overrideCo
                 {message.toolProgress ? ` · ${message.toolProgress}` : '...'}
               </span>
             )}
-            {message.toolStatus === 'success' && (
-              <span className="text-green-400">✓ done</span>
-            )}
-            {message.toolStatus === 'error' && (
-              <span className="text-red-400">✗ failed</span>
-            )}
+            {message.toolStatus === 'success' && <span className="text-green-400">✓ done</span>}
+            {message.toolStatus === 'error' && <span className="text-red-400">✗ failed</span>}
           </div>
           {message.content && (
             <pre className="mt-1 whitespace-pre-wrap break-all text-xs opacity-80">
@@ -74,9 +70,7 @@ export const ChatMessage = React.memo(function ChatMessage({ message, overrideCo
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mx-2 my-1`}>
       <div
         className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-          isUser
-            ? 'bg-primary text-primary-foreground'
-            : 'bg-muted text-foreground'
+          isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'
         }`}
       >
         {!isUser && (
@@ -103,8 +97,6 @@ export const ChatMessage = React.memo(function ChatMessage({ message, overrideCo
       </div>
     </div>
   );
-}
-
 });
 
 export default ChatMessage;
