@@ -221,6 +221,11 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const streamingMessageIdRef = useRef<string | null>(null);
   const activeStudyUIDRef = useRef<string | null>(activeStudyUID);
   activeStudyUIDRef.current = activeStudyUID;
+  // Tracks the last *non-null* study UID we actually reset tabs/data for.
+  // Used to prevent the reset effect from firing when activeStudyUID
+  // transiently becomes null (e.g. while display sets are being updated
+  // after a segmentation load) and then returns to the same study.
+  const prevNonNullStudyUIDRef = useRef<string | null>(activeStudyUID);
 
   // Keep refetch callbacks current on every render (stable refs, latest fns).
   triggerRadiomicsRefetchRef.current = () => {
@@ -447,7 +452,17 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   }, [activeStudyUID]);
 
   // ── Reset both data tabs when the active study changes ───────────────────
+  // Guard: skip when activeStudyUID is null (transient during display-set
+  // updates, e.g. after a segmentation load) or when it returns to the same
+  // study it was before.  Without this guard, a DISPLAY_SETS_CHANGED event
+  // that briefly returns null from getActiveStudyUID causes reportsList to
+  // be cleared → ReportsPanel unmounts → in-flight fetch is cancelled →
+  // the panel is stuck on "Loading report…" because the auto-switch flag
+  // (pendingAutoSwitchToReportsRef) has already been consumed.
   useEffect(() => {
+    if (!activeStudyUID) return; // transient null — ignore
+    if (activeStudyUID === prevNonNullStudyUIDRef.current) return; // same study — ignore
+    prevNonNullStudyUIDRef.current = activeStudyUID;
     setActiveTab('chat');
     setRadiomicsData(null);
     setReportsList([]);
