@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, startTransition } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useSystem } from '@ohif/core';
 import type { ChatHistoryStorage, ChatMessage, AgentConfig, StreamMessage, DicomWebContext } from '../types';
 import { AIAgentService } from '../services/AIAgentService';
 import { ChatMessage as ChatMessageComponent } from '../components/ChatMessage';
+import { StreamingMessage, type StreamingMessageHandle } from '../components/StreamingMessage';
 import { AgentConfigPanel } from '../components/AgentConfigPanel';
 import { QuickActionBar } from '../components/QuickActionBar';
 
@@ -201,21 +202,19 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const serverSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const browserSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Token-streaming: incoming tokens accumulate in streamBufferRef and are
-  // flushed into streamingContent (a plain string state) at most every
-  // STREAM_FLUSH_MS ms. The messages array is NOT touched during streaming —
-  // only on completion. This prevents expensive prev.map() + MarkdownRenderer
-  // re-parses 20x/sec on every token flush.
-  const STREAM_FLUSH_MS = 100;
+  // ── Imperative streaming ──────────────────────────────────────────────────
+  // Tokens are flushed to the DOM at most every STREAM_FLUSH_MS ms via a
+  // direct textContent write on the <StreamingMessage> DOM node.
+  // No React state is touched during streaming → zero re-renders, zero
+  // reconciliation, zero layout effects per token.
+  const STREAM_FLUSH_MS = 80;
   const streamBufferRef = useRef<string>('');
-  // Mirrors streamingContent state but readable synchronously in closures
-  // (e.g. onDone, handleCancel) without stale-closure issues.
-  const streamingContentRef = useRef<string>('');
   const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // The text currently being streamed — rendered as plain text while streaming,
-  // committed to the messages array (and switched to MarkdownRenderer) on done.
-  const [streamingContent, setStreamingContent] = useState<string>('');
+  // Handle to the imperatively-controlled streaming message DOM node.
+  const streamingMsgRef = useRef<StreamingMessageHandle | null>(null);
+  // Timestamp to show on the streaming bubble (set when streaming starts).
+  const streamingMsgTimestampRef = useRef<Date>(new Date());
 
   // Always-current messages reference — used inside debounced server-save callbacks
   // so the timer closure never captures a stale snapshot of messages.
@@ -231,8 +230,11 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const prevScrollHeightRef = useRef(0);
 
   // Slice of the full messages array that is currently rendered.
+  // While streaming, hide the empty placeholder — <StreamingMessage> is shown instead.
   const visibleStart = Math.max(0, messages.length - displayCount);
-  const visibleMessages = messages.slice(visibleStart);
+  const visibleMessages = messages
+    .slice(visibleStart)
+    .filter(m => !(isStreaming && m.id === streamingMessageIdRef.current));
   const hasMore = visibleStart > 0;
 
   // True once the initial history load for the current study has completed.
@@ -379,18 +381,8 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
     }
   }, [messages]);
 
-  // ── Scroll: follow streaming content as it grows ─────────────────────────
-  // useEffect (async, after paint) is intentional: we don't need synchronous
-  // scroll during streaming, and keeping it async avoids blocking the browser.
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container || !isStreaming) return;
-    const distanceFromBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight;
-    if (distanceFromBottom < 150) {
-      container.scrollTop = container.scrollHeight;
-    }
-  }, [streamingContent, isStreaming]);
+  // Scroll-during-streaming is handled inside the flush timer callback so it
+  // fires at the same rate as DOM text updates (no extra effect needed).
 
   // Load an older page of messages when the user scrolls close to the top.
   const handleScrollMessages = useCallback(() => {
@@ -435,16 +427,22 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
 
       const studyContext = services ? buildStudyContext(services, extensionManager) : null;
 
-      // Create a placeholder for the assistant response
+      // Create a placeholder for the assistant response.
+      // The placeholder stays in the messages array but is hidden while
+      // streaming — the <StreamingMessage> DOM node is shown instead.
+      // On completion the placeholder is updated with the committed content.
       const assistantMsgId = nextId();
+      const streamStartTime = new Date();
+      streamingMsgTimestampRef.current = streamStartTime;
       streamingMessageIdRef.current = assistantMsgId;
+      streamingMsgRef.current?.reset();
       setMessages(prev => [
         ...prev,
         {
           id: assistantMsgId,
           role: 'assistant',
           content: '',
-          timestamp: new Date(),
+          timestamp: streamStartTime,
         },
       ]);
 
@@ -456,19 +454,26 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
         studyContext,
         (event: StreamMessage) => handleStreamEvent(event, assistantMsgId),
         (error: string) => {
-          // Commit any streaming content that arrived before the error
-          const partialContent = streamingContentRef.current + streamBufferRef.current;
-          streamBufferRef.current = '';
-          streamingContentRef.current = '';
+          // Cancel any pending flush timer and flush remaining buffer to DOM.
           if (streamFlushTimerRef.current) {
             clearTimeout(streamFlushTimerRef.current);
             streamFlushTimerRef.current = null;
           }
-          setStreamingContent('');
+          if (streamBufferRef.current) {
+            streamingMsgRef.current?.appendText(streamBufferRef.current);
+            streamBufferRef.current = '';
+          }
+          const partialContent = streamingMsgRef.current?.getText() ?? '';
+          streamingMsgRef.current?.reset();
           setMessages(prev =>
             prev.map(m =>
               m.id === assistantMsgId
-                ? { ...m, content: partialContent ? `${partialContent}\n\nError: ${error}` : `Error: ${error}` }
+                ? {
+                    ...m,
+                    content: partialContent
+                      ? `${partialContent}\n\nError: ${error}`
+                      : `Error: ${error}`,
+                  }
                 : m
             )
           );
@@ -476,16 +481,18 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
           streamingMessageIdRef.current = null;
         },
         () => {
-          // Flush any remaining buffered tokens into the messages array.
-          // This converts the plain-text streaming view to the full markdown view.
+          // onDone: flush any last buffered tokens then commit to messages.
+          // This unmounts <StreamingMessage> and switches to MarkdownRenderer.
           if (streamFlushTimerRef.current) {
             clearTimeout(streamFlushTimerRef.current);
             streamFlushTimerRef.current = null;
           }
-          const finalContent = streamingContentRef.current + streamBufferRef.current;
-          streamBufferRef.current = '';
-          streamingContentRef.current = '';
-          setStreamingContent('');
+          if (streamBufferRef.current) {
+            streamingMsgRef.current?.appendText(streamBufferRef.current);
+            streamBufferRef.current = '';
+          }
+          const finalContent = streamingMsgRef.current?.getText() ?? '';
+          streamingMsgRef.current?.reset();
           if (finalContent) {
             setMessages(prev =>
               prev.map(m =>
@@ -505,30 +512,20 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
     (event: StreamMessage, assistantMsgId: string) => {
       switch (event.type) {
         case 'thought':
-          // Append thought to assistant message (shown as italic prefix)
-          setMessages(prev =>
-            prev.map(m =>
-              m.id === assistantMsgId
-                ? { ...m, content: m.content ? m.content : `_Thinking..._\n` }
-                : m
-            )
-          );
+          // The "Agent is thinking…" spinner in the chat bar already covers this.
           break;
 
         case 'final':
-          // Discard any buffered tokens — the final content supersedes them.
+          // The final event carries the authoritative complete text.
+          // Cancel any pending flush, then write the full content directly
+          // to the DOM so it's visible immediately before onDone commits it.
           if (streamFlushTimerRef.current) {
             clearTimeout(streamFlushTimerRef.current);
             streamFlushTimerRef.current = null;
           }
           streamBufferRef.current = '';
-          streamingContentRef.current = '';
-          setStreamingContent('');
-          setMessages(prev =>
-            prev.map(m =>
-              m.id === assistantMsgId ? { ...m, content: event.content } : m
-            )
-          );
+          streamingMsgRef.current?.reset();
+          streamingMsgRef.current?.appendText(event.content);
           break;
 
         case 'tool_start':
@@ -599,15 +596,13 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
         }
 
         case 'action':
-          // No-op: action events carry no displayable content.
-          break;
+          break; // no displayable content
 
         case 'observation':
         default:
-          // Buffer the token; flush to streamingContent (NOT messages) every
-          // STREAM_FLUSH_MS ms. Because messages is never mutated during
-          // streaming, all memoised ChatMessage instances are skipped by
-          // React.memo, and no MarkdownRenderer re-parse occurs mid-stream.
+          // Accumulate the token in the buffer.  The timer writes the batch
+          // directly to the <StreamingMessage> DOM node — no React state
+          // update, no re-render, no reconciliation.
           if (event.content) {
             streamBufferRef.current += event.content;
             if (!streamFlushTimerRef.current) {
@@ -616,10 +611,19 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
                 const text = streamBufferRef.current;
                 streamBufferRef.current = '';
                 if (text) {
-                  streamingContentRef.current += text;
-                  startTransition(() => {
-                    setStreamingContent(streamingContentRef.current);
-                  });
+                  // ── Direct DOM write — completely bypasses React ──────────
+                  streamingMsgRef.current?.appendText(text);
+                  // ── Scroll to bottom without a React effect ───────────────
+                  const container = scrollContainerRef.current;
+                  if (container) {
+                    const dist =
+                      container.scrollHeight -
+                      container.scrollTop -
+                      container.clientHeight;
+                    if (dist < 150) {
+                      container.scrollTop = container.scrollHeight;
+                    }
+                  }
                 }
               }, STREAM_FLUSH_MS);
             }
@@ -649,8 +653,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
     } else {
       clearHistory(activeStudyUID, config.chatHistoryStorage);
     }
-    streamingContentRef.current = '';
-    setStreamingContent('');
+    streamingMsgRef.current?.reset();
     setDisplayCount(PAGE_SIZE);
     setMessages([
       {
@@ -667,17 +670,20 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
       clearTimeout(streamFlushTimerRef.current);
       streamFlushTimerRef.current = null;
     }
-    // Commit whatever was streamed so the user can read the partial response.
-    const partialContent = streamingContentRef.current + streamBufferRef.current;
-    streamBufferRef.current = '';
-    streamingContentRef.current = '';
+    // Flush any remaining buffered tokens to DOM before reading getText().
+    if (streamBufferRef.current) {
+      streamingMsgRef.current?.appendText(streamBufferRef.current);
+      streamBufferRef.current = '';
+    }
+    // Commit the partial response so the user can read what arrived.
+    const partialContent = streamingMsgRef.current?.getText() ?? '';
+    streamingMsgRef.current?.reset();
     if (partialContent && streamingMessageIdRef.current) {
       const msgId = streamingMessageIdRef.current;
       setMessages(prev =>
         prev.map(m => (m.id === msgId ? { ...m, content: partialContent } : m))
       );
     }
-    setStreamingContent('');
     agentService.cancelCurrentRequest();
     setIsStreaming(false);
   };
@@ -765,16 +771,18 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
         )}
 
         {visibleMessages.map(msg => (
-          <ChatMessageComponent
-            key={msg.id}
-            message={msg}
-            overrideContent={
-              isStreaming && msg.id === streamingMessageIdRef.current
-                ? streamingContent
-                : undefined
-            }
-          />
+          <ChatMessageComponent key={msg.id} message={msg} />
         ))}
+
+        {/* Streaming bubble — visible only while the agent is generating text.
+            Updates via direct DOM writes; never triggers a React re-render. */}
+        {isStreaming && streamingMessageIdRef.current && (
+          <StreamingMessage
+            ref={streamingMsgRef}
+            timestamp={streamingMsgTimestampRef.current}
+          />
+        )}
+
         {isStreaming && (
           <div className="mx-2 mt-1 flex items-center gap-2 text-xs text-gray-500">
             <span className="animate-spin">⟳</span>
