@@ -28,7 +28,7 @@ from config import settings
 from .llm_factory import create_llm, LLMProvider
 from .tools import (
     run_totalsegmentator,
-    run_nnunet,
+    run_monet_segmentation,
     run_custom_segmentation,
     extract_radiomics,
     generate_radiology_report,
@@ -79,6 +79,7 @@ When given a task, follow these priorities:
 - Think step-by-step about what tools you need.
 - Always compile the report AFTER collecting all available data.
 - Be precise with UIDs and parameters.
+- Be ALWAYS sure that there is a segmentation mask available for the study, if not, run the segmentation model to generate a mask.
 - If something fails, explain the error clearly and suggest alternatives.
 - The `dicomweb_url` parameter in every tool maps to the WADO-RS retrieve
   endpoint (`wadoRoot` in the study context). It is **optional** — when omitted
@@ -124,9 +125,9 @@ def _build_tools(segmentation_model: str) -> list:
     """Return tool list based on the active segmentation model."""
     seg_tools = {
         "totalsegmentator": run_totalsegmentator,
-        "nnunet-autopet": run_nnunet,
+        "monet-bundle": run_monet_segmentation,
     }
-    active_seg = seg_tools.get(segmentation_model, run_totalsegmentator)
+    active_seg = seg_tools.get(segmentation_model, run_monet_segmentation)
 
     return [
         convert_dicom_seg_to_nifti,

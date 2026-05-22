@@ -27,6 +27,17 @@ logger = logging.getLogger(__name__)
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
 
+def _resample_mask_to_reference(mask_img: sitk.Image, reference_path: Path) -> sitk.Image:
+    """Resample a binary mask onto the reference image grid (size, spacing, origin, direction)."""
+    reference = sitk.ReadImage(str(reference_path))
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetReferenceImage(reference)
+    resampler.SetInterpolator(sitk.sitkNearestNeighbor)
+    resampler.SetDefaultPixelValue(0)
+    resampler.SetTransform(sitk.Transform())
+    return resampler.Execute(mask_img)
+
+
 def _iop_to_direction(iop: list[float]) -> tuple[float, ...]:
     """
     Build a 9-element direction cosine tuple (row, col, normal) from a
@@ -41,6 +52,7 @@ def _iop_to_direction(iop: list[float]) -> tuple[float, ...]:
 def _convert_seg_pydicom(
     seg_dcm: pydicom.Dataset,
     output_dir: Path,
+    reference_image_path: Optional[Path] = None,
 ) -> dict[str, str]:
     """
     Pure pydicom + SimpleITK DICOM SEG → NIfTI conversion.
@@ -141,6 +153,8 @@ def _convert_seg_pydicom(
         mask_img.SetSpacing((pixel_spacing[1], pixel_spacing[0], z_spacing))
         mask_img.SetOrigin(origin)
         mask_img.SetDirection(direction)
+        if reference_image_path:
+            mask_img = _resample_mask_to_reference(mask_img, reference_image_path)
 
         safe_label = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)
         out_path = output_dir / f"seg_{seg_num}_{safe_label}.nii.gz"
@@ -151,10 +165,18 @@ def _convert_seg_pydicom(
     return results
 
 
-def convert_seg_file_to_nifti(seg_dcm_path: Path, output_dir: Path) -> dict[str, str]:
+def convert_seg_file_to_nifti(
+    seg_dcm_path: Path,
+    output_dir: Path,
+    reference_image_path: Optional[Path] = None,
+) -> dict[str, str]:
     """
     Convert a single DICOM SEG file to per-segment NIfTI masks.
     Tries highdicom first; falls back to the pure-pydicom implementation.
+
+    When reference_image_path is set, each mask is resampled onto that image's
+    grid so size, orientation, and spacing match the source volume.
+
     Returns {segment_label: nifti_path}.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -231,6 +253,8 @@ def convert_seg_file_to_nifti(seg_dcm_path: Path, output_dir: Path) -> dict[str,
                     if hasattr(pos, "ImagePositionPatient") and len(pos.ImagePositionPatient) >= 3:
                         origin = [float(v) for v in pos.ImagePositionPatient]
                         mask_img.SetOrigin(tuple(origin))
+            if reference_image_path:
+                mask_img = _resample_mask_to_reference(mask_img, reference_image_path)
             safe_label = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)
             out_path = output_dir / f"seg_{seg_num}_{safe_label}.nii.gz"
             sitk.WriteImage(mask_img, str(out_path))
@@ -246,7 +270,7 @@ def convert_seg_file_to_nifti(seg_dcm_path: Path, output_dir: Path) -> dict[str,
         logger.warning("highdicom conversion failed (%s), falling back to pydicom", exc)
 
     ds = pydicom.dcmread(str(seg_dcm_path))
-    return _convert_seg_pydicom(ds, output_dir)
+    return _convert_seg_pydicom(ds, output_dir, reference_image_path)
 
 
 # ── LangChain tool ────────────────────────────────────────────────────────────

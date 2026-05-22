@@ -3,7 +3,7 @@ Segmentation tools for the AI agent.
 
 Supports:
 - TotalSegmentator (117 anatomical structures)
-- nnU-Net models (e.g., AutoPET)
+- MONet bundles (nnUNet-based segmentation)
 - Custom REST endpoint models
 """
 from __future__ import annotations
@@ -104,25 +104,19 @@ def run_totalsegmentator(
 # ── nnU-Net ──────────────────────────────────────────────────────────────────
 
 @tool
-def run_nnunet(
+def run_monet_segmentation(
     study_instance_uid: str,
     series_instance_uid: str,
     dicomweb_url: Optional[str] = None,
-    dataset_id: int = 220,
-    configuration: str = "3d_fullres",
-    fold: str = "all",
 ) -> str:
     """
-    Run an nnU-Net model on a DICOM series.
+    Run a Monet segmentation model on a DICOM series.
 
     Args:
         study_instance_uid: DICOM Study Instance UID.
         series_instance_uid: DICOM Series Instance UID.
         dicomweb_url: DICOMweb WADO-RS base URL.
             Optional — falls back to the server's DICOMWEB_URL env var.
-        dataset_id: nnU-Net dataset ID (default 220 = AutoPET).
-        configuration: nnU-Net configuration (default '3d_fullres').
-        fold: Fold to use (default 'all' = ensemble).
 
     Returns:
         JSON string with segmentation result.
@@ -137,7 +131,6 @@ def run_nnunet(
         settings.segmentation_output_dir
         / study_instance_uid
         / series_instance_uid
-        / f"nnunet_{dataset_id}"
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -145,12 +138,6 @@ def run_nnunet(
     if not dcm_files:
         return json.dumps({"error": "No DICOM files found."})
 
-    try:
-        import nnunetv2  # noqa: F401 – check install
-    except ImportError:
-        return json.dumps({
-            "error": "nnunetv2 is not installed. Install with: pip install nnunetv2"
-        })
 
     cmd = [
         "nnUNetv2_predict",

@@ -52,7 +52,7 @@ from fastmcp import FastMCP
 
 from agent.tools.segmentation import (
     run_totalsegmentator,
-    run_nnunet,
+    run_monet_segmentation,
     run_custom_segmentation,
 )
 from agent.tools.dicom_seg import convert_dicom_seg_to_nifti
@@ -122,41 +122,30 @@ def segment_totalsegmentator(
 
 
 @mcp.tool()
-def segment_nnunet(
+def segment_monet_bundle(
     study_instance_uid: str,
     series_instance_uid: str,
     dicomweb_url: Optional[str] = None,
-    dataset_id: int = 220,
-    configuration: str = "3d_fullres",
-    fold: str = "all",
 ) -> str:
     """
-    Run an nnU-Net model on a DICOM series.
+    Run a Monet segmentation model on a DICOM series.
 
-    nnU-Net is a self-configuring segmentation framework. The default dataset
-    220 is AutoPET (whole-body PET-CT tumour detection). Other trained
-    datasets can be used by changing dataset_id.
+    Monet is a segmentation model that can be used to segment anatomical structures.
 
     Args:
         study_instance_uid: DICOM Study Instance UID.
         series_instance_uid: DICOM Series Instance UID.
         dicomweb_url: DICOMweb WADO-RS base URL.
             Falls back to the DICOMWEB_URL environment variable.
-        dataset_id: nnU-Net dataset ID (default 220 = AutoPET).
-        configuration: nnU-Net configuration, e.g. "3d_fullres" or "2d".
-        fold: Fold(s) to use. "all" runs an ensemble of all trained folds.
 
     Returns:
         JSON string with "status", "output_dir", and "files" on success,
         or "error" on failure.
     """
-    return run_nnunet.invoke({
+    return run_monet_segmentation.invoke({
         "study_instance_uid": study_instance_uid,
         "series_instance_uid": series_instance_uid,
         "dicomweb_url": dicomweb_url,
-        "dataset_id": dataset_id,
-        "configuration": configuration,
-        "fold": fold,
     })
 
 

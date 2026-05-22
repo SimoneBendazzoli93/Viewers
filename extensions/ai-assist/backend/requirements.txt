@@ -36,3 +36,4 @@ aiofiles==24.1.0
 
 # MCP server (Model Context Protocol — expose tools to external agents)
 fastmcp>=2.0.0
+scipy

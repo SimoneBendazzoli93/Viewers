@@ -284,10 +284,10 @@ async def list_models():
             "type": "totalsegmentator",
         },
         {
-            "id": "nnunet-autopet",
-            "name": "AutoPET (nnU-Net)",
-            "description": "Whole-body lesion detection for PET/CT",
-            "type": "nnunet",
+            "id": "monet-bundle",
+            "name": "MONet Bundle",
+            "description": "nnUNet-based segmentation",
+            "type": "monet",
         },
     ]
 

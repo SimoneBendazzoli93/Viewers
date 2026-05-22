@@ -123,7 +123,9 @@ def extract_radiomics(
         if not seg_dcm_files:
             return json.dumps({"error": f"No DICOM SEG files found for series {seg_series_instance_uid}."})
         try:
-            masks = convert_seg_file_to_nifti(seg_dcm_files[0], seg_output_dir)
+            masks = convert_seg_file_to_nifti(
+                seg_dcm_files[0], seg_output_dir, reference_image_path=image_nifti
+            )
         except Exception as exc:
             return json.dumps({"error": f"DICOM SEG conversion failed: {exc}"})
         if not masks:
