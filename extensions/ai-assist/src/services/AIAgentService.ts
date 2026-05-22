@@ -1,4 +1,5 @@
 import type { AgentConfig, ChatMessage, ReportEntry, StreamMessage } from '../types';
+import { buildBackendUrl } from '../utils/backendUrl';
 
 const DEFAULT_CONFIG: AgentConfig = {
   backendUrl: 'http://localhost:8000',
@@ -12,13 +13,13 @@ const DEFAULT_CONFIG: AgentConfig = {
       type: 'totalsegmentator',
     },
     {
-      id: 'nnunet-autopet',
-      name: 'AutoPET (nnU-Net)',
-      description: 'Whole-body lesion detection for PET/CT',
-      type: 'nnunet',
+      id: 'monet-bundle',
+      name: 'MONet Bundle',
+      description: 'nnUNet-based segmentation',
+      type: 'monet',
     },
   ],
-  activeSegmentationModel: 'totalsegmentator',
+  activeSegmentationModel: 'monet-bundle',
   chatHistoryStorage: 'localStorage',
   language: 'English',
 } satisfies AgentConfig;
@@ -86,7 +87,7 @@ export class AIAgentService {
     };
 
     try {
-      const response = await fetch(`${this.config.backendUrl}/api/chat/stream`, {
+      const response = await fetch(buildBackendUrl(this.config.backendUrl, '/api/chat/stream'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -148,7 +149,9 @@ export class AIAgentService {
 
   async loadServerHistory(studyUID: string): Promise<ChatMessage[]> {
     try {
-      const resp = await fetch(`${this.config.backendUrl}/api/chat/history/${encodeURIComponent(studyUID)}`);
+      const resp = await fetch(
+        buildBackendUrl(this.config.backendUrl, `/api/chat/history/${encodeURIComponent(studyUID)}`)
+      );
       if (!resp.ok) return [];
       const data = await resp.json();
       return (data.messages ?? []).map((m: ChatMessage & { timestamp: string }) => ({
@@ -162,7 +165,7 @@ export class AIAgentService {
 
   async saveServerHistory(studyUID: string, messages: ChatMessage[]): Promise<void> {
     try {
-      await fetch(`${this.config.backendUrl}/api/chat/history/${encodeURIComponent(studyUID)}`, {
+      await fetch(buildBackendUrl(this.config.backendUrl, `/api/chat/history/${encodeURIComponent(studyUID)}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages }),
@@ -174,7 +177,7 @@ export class AIAgentService {
 
   async deleteServerHistory(studyUID: string): Promise<void> {
     try {
-      await fetch(`${this.config.backendUrl}/api/chat/history/${encodeURIComponent(studyUID)}`, {
+      await fetch(buildBackendUrl(this.config.backendUrl, `/api/chat/history/${encodeURIComponent(studyUID)}`), {
         method: 'DELETE',
       });
     } catch {
@@ -191,7 +194,7 @@ export class AIAgentService {
   async fetchReports(studyUID: string): Promise<ReportEntry[]> {
     try {
       const resp = await fetch(
-        `${this.config.backendUrl}/api/reports/${encodeURIComponent(studyUID)}`
+        buildBackendUrl(this.config.backendUrl, `/api/reports/${encodeURIComponent(studyUID)}`)
       );
       if (!resp.ok) return [];
       const data = await resp.json();
@@ -210,7 +213,10 @@ export class AIAgentService {
   async fetchReportContent(studyUID: string, filename: string): Promise<string | null> {
     try {
       const resp = await fetch(
-        `${this.config.backendUrl}/api/reports/${encodeURIComponent(studyUID)}/${encodeURIComponent(filename)}`
+        buildBackendUrl(
+          this.config.backendUrl,
+          `/api/reports/${encodeURIComponent(studyUID)}/${encodeURIComponent(filename)}`
+        )
       );
       if (!resp.ok) return null;
       const data = await resp.json();
@@ -230,7 +236,7 @@ export class AIAgentService {
   async fetchRadiomics(studyUID: string): Promise<string | null> {
     try {
       const resp = await fetch(
-        `${this.config.backendUrl}/api/radiomics/${encodeURIComponent(studyUID)}`
+        buildBackendUrl(this.config.backendUrl, `/api/radiomics/${encodeURIComponent(studyUID)}`)
       );
       if (!resp.ok) return null;
       return await resp.text();
@@ -241,7 +247,7 @@ export class AIAgentService {
 
   async checkBackendHealth(): Promise<{ ok: boolean; version?: string }> {
     try {
-      const resp = await fetch(`${this.config.backendUrl}/health`, { method: 'GET' });
+      const resp = await fetch(buildBackendUrl(this.config.backendUrl, '/health'), { method: 'GET' });
       if (resp.ok) {
         const data = await resp.json();
         return { ok: true, version: data.version };
@@ -254,7 +260,7 @@ export class AIAgentService {
 
   async getAvailableModels(): Promise<{ llm: LLMModelOption[]; segmentation: SegmentationModelConfig[] }> {
     try {
-      const resp = await fetch(`${this.config.backendUrl}/api/models`);
+      const resp = await fetch(buildBackendUrl(this.config.backendUrl, '/api/models'));
       if (resp.ok) {
         return await resp.json();
       }

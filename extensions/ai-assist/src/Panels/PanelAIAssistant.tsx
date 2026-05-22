@@ -9,6 +9,7 @@ import type {
   DicomWebContext,
 } from '../types';
 import { AIAgentService } from '../services/AIAgentService';
+import { buildBackendUrl, parseResolvableUrl } from '../utils/backendUrl';
 import { ChatMessage as ChatMessageComponent } from '../components/ChatMessage';
 import { StreamingMessage, type StreamingMessageHandle } from '../components/StreamingMessage';
 import { AgentConfigPanel } from '../components/AgentConfigPanel';
@@ -689,10 +690,12 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
         let downloadUrl: string | undefined;
         let downloadFilename: string | undefined;
         if (event.downloadUrl) {
-          const backendUrl = agentService.getConfig().backendUrl.replace(/\/$/, '');
-          downloadUrl = `${backendUrl}${event.downloadUrl}`;
+          downloadUrl = buildBackendUrl(
+            agentService.getConfig().backendUrl,
+            event.downloadUrl
+          );
           try {
-            const urlObj = new URL(downloadUrl);
+            const urlObj = parseResolvableUrl(downloadUrl);
             const filePath = urlObj.searchParams.get('path') ?? '';
             downloadFilename = filePath.split('/').pop() || 'download';
           } catch {

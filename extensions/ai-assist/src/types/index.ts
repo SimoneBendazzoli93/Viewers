@@ -33,7 +33,7 @@ export interface SegmentationModelConfig {
   id: string;
   name: string;
   description: string;
-  type: 'totalsegmentator' | 'nnunet' | 'custom';
+  type: 'totalsegmentator' | 'monet' | 'custom';
   endpoint?: string;
   structures?: string[];
 }

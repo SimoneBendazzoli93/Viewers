@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { AgentConfig, ChatHistoryStorage, LLMModelOption, LLMProvider, SegmentationModelConfig } from '../types';
 import { DEFAULT_LLM_MODELS } from '../services/AIAgentService';
+import { buildBackendUrl, parseResolvableUrl } from '../utils/backendUrl';
 
 interface Props {
   config: AgentConfig;
@@ -43,7 +44,7 @@ export function AgentConfigPanel({ config, onSave, onClose }: Props) {
     setOllamaLoading(true);
     setOllamaError(null);
 
-    const endpoint = `${local.backendUrl}/api/ollama/models`;
+    const endpoint = buildBackendUrl(local.backendUrl, '/api/ollama/models');
     const headers: Record<string, string> = {};
     if (local.apiKey) {
       headers['Authorization'] = `Bearer ${local.apiKey}`;
@@ -55,10 +56,10 @@ export function AgentConfigPanel({ config, onSave, onClose }: Props) {
     console.log('window.location.origin:', window.location.origin);
 
     try {
-      const url = new URL(endpoint);
+      const url = parseResolvableUrl(endpoint);
       console.log('Parsed URL:', url.toString(), '| protocol:', url.protocol);
 
-      const resp = await fetch(url.toString(), { headers });
+      const resp = await fetch(endpoint, { headers });
       console.log('Response status:', resp.status, resp.statusText);
       console.log('Response headers:', Object.fromEntries(resp.headers.entries()));
 
@@ -165,7 +166,7 @@ export function AgentConfigPanel({ config, onSave, onClose }: Props) {
             className="w-full rounded border border-gray-600 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-blue-500 focus:outline-none"
             value={local.backendUrl}
             onChange={e => setLocal(prev => ({ ...prev, backendUrl: e.target.value }))}
-            placeholder="http://localhost:8000"
+            placeholder="http://localhost:8000 or /ai-api"
           />
         </div>
 
