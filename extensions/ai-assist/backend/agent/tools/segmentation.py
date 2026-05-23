@@ -20,7 +20,8 @@ from langchain_core.tools import tool
 
 from config import settings
 from .dicom_utils import fetch_series_to_dir, resolve_dicomweb_url
-
+from python_on_whales import docker
+import uuid
 
 # ── TotalSegmentator ────────────────────────────────────────────────────────
 
@@ -103,10 +104,42 @@ def run_totalsegmentator(
 
 # ── nnU-Net ──────────────────────────────────────────────────────────────────
 
+def run_monet_bundle(series_dir: Path, output_dir: Path, task_name: str, image: str) -> subprocess.CompletedProcess[str]:
+    random_name = str(uuid.uuid4())
+    docker_image = image
+    docker.run(
+        image=docker_image,
+        gpus="device=0",
+        name="monet-bundle-{}".format(random_name),
+        volumes=[
+            (series_dir, "/var/holoscan/input"),
+            # (torchscript_model, "/opt/holoscan/models"),
+            (output_dir, "/var/holoscan/output"),
+        ],
+        envs={
+            "SEGMENTATION_TASK_CONFIG_FILE": "/etc/holoscan/Segmentation_Task.yaml",
+            "SEGMENTATION_TASK_NAME": task_name,
+        },
+        shm_size="2g",
+        remove=True
+    )
+    return json.dumps({"status": "success", "output_dir": str(output_dir)})
+
+@tool
+def list_monet_tasks() -> list[str]:
+    """
+    List all available Monet tasks.
+
+    Returns:
+        List of available Monet tasks.
+    """
+    return list(settings.monet_bundle_config["tasks"].keys())
+
 @tool
 def run_monet_segmentation(
     study_instance_uid: str,
     series_instance_uid: str,
+    task: str,
     dicomweb_url: Optional[str] = None,
 ) -> str:
     """
@@ -117,7 +150,7 @@ def run_monet_segmentation(
         series_instance_uid: DICOM Series Instance UID.
         dicomweb_url: DICOMweb WADO-RS base URL.
             Optional — falls back to the server's DICOMWEB_URL env var.
-
+        task: Task name to run.
     Returns:
         JSON string with segmentation result.
     """
@@ -134,31 +167,26 @@ def run_monet_segmentation(
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    dcm_files = fetch_series_to_dir(url, study_instance_uid, series_instance_uid, series_dir)
-    if not dcm_files:
-        return json.dumps({"error": "No DICOM files found."})
-
-
-    cmd = [
-        "nnUNetv2_predict",
-        "-i", str(series_dir),
-        "-o", str(output_dir),
-        "-d", str(dataset_id),
-        "-c", configuration,
-        "-f", fold,
-    ]
+    if not series_dir.exists():
+        dcm_files = fetch_series_to_dir(url, study_instance_uid, series_instance_uid, series_dir)
+        if not dcm_files:
+            return json.dumps({"error": "No DICOM files found."})
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1200)
-        if result.returncode != 0:
+        series_dir = series_dir.replace(settings.dicom_cache_dir, settings.host_dicom_cache_dir)
+        output_dir = output_dir.replace(settings.segmentation_output_dir, settings.host_segmentation_output_dir)
+        task_name = settings.monet_bundle_config["tasks"][task]["task_name"]
+        image = settings.monet_bundle_config["tasks"][task]["image"]
+        try:
+            result = run_monet_bundle(series_dir, output_dir, task_name, image)
+        except Exception as e:
             return json.dumps({
-                "error": "nnU-Net prediction failed",
-                "stderr": result.stderr[-2000:],
+                "error": "MONet prediction failed",
+                "detail": str(e)
             })
-    except subprocess.TimeoutExpired:
-        return json.dumps({"error": "nnU-Net prediction timed out."})
 
-    seg_files = list(output_dir.glob("*.nii.gz"))
+
+    seg_files = list(output_dir.glob("*.dcm"))
     return json.dumps({
         "status": "success",
         "output_dir": str(output_dir),

@@ -29,6 +29,7 @@ from .llm_factory import create_llm, LLMProvider
 from .tools import (
     run_totalsegmentator,
     run_monet_segmentation,
+    list_monet_tasks,
     run_custom_segmentation,
     extract_radiomics,
     generate_radiology_report,
@@ -44,6 +45,7 @@ You assist radiologists and medical professionals with:
 4. **Study Analysis** - Answer questions about the current DICOM study.
 5. **DICOM SEG Integration** - Use existing DICOM segmentation objects already present in the study.
 
+List MONet tasks using the tool `list_monet_tasks`.
 When given a task, follow these priorities:
 
 **Segmentation mask selection:**

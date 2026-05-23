@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Literal
-
+import os
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -74,17 +74,21 @@ class Settings(BaseSettings):
     default_segmentation_model: str = "totalsegmentator"
 
     # Directory where DICOM files are temporarily cached
-    dicom_cache_dir: Path = Path("/tmp/ohif-ai-dicom-cache")
+    dicom_cache_dir: Path = Path("/data/ohif-ai-dicom-cache")
+
+    host_dicom_cache_dir: Path = Path(os.getenv("HOST_DICOM_CACHE_DIR", "/data/ohif-ai-dicom-cache"))
 
     # Directory where segmentation masks are saved
-    segmentation_output_dir: Path = Path("/tmp/ohif-ai-seg-output")
+    segmentation_output_dir: Path = Path("/data/ohif-ai-seg-output")
+
+    host_segmentation_output_dir: Path = Path(os.getenv("HOST_SEGMENTATION_OUTPUT_DIR", "/data/ohif-ai-seg-output"))
 
     # Directory where radiomics results are saved
-    radiomics_output_dir: Path = Path("/tmp/ohif-ai-radiomics-output")
+    radiomics_output_dir: Path = Path("/data/ohif-ai-radiomics-output")
 
     # Directory where generated radiology reports are saved
     # Each study gets versioned Markdown files: <dir>/<studyUID>/v001_YYYYMMDD_HHMMSS.md
-    reports_output_dir: Path = Path("/tmp/ohif-ai-reports-output")
+    reports_output_dir: Path = Path("/data/ohif-ai-reports-output")
 
     # TotalSegmentator task (see TotalSegmentator docs)
     totalsegmentator_task: str = "total"
@@ -101,7 +105,9 @@ class Settings(BaseSettings):
     # Directory where per-study chat history JSON files are stored when the
     # frontend uses the "server" storage backend.
     # Each study gets its own file: <chat_history_dir>/<studyInstanceUID>.json
-    chat_history_dir: Path = Path("/tmp/ohif-ai-chat-history")
+    chat_history_dir: Path = Path("/data/ohif-ai-chat-history")
+
+    monet_bundle_config: dict = json.load(open(os.getenv("MONET_BUNDLE_CONFIG_FILE")))
 
 
 settings = Settings()
