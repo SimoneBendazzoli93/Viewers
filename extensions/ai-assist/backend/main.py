@@ -8,6 +8,7 @@ FastAPI application providing:
   DELETE /api/chat/history/{uid}   – delete chat history
   GET  /api/radiomics/{study_uid}  – return the latest radiomics CSV for a study (404 if none)
   GET  /api/models                 – list all available LLM and segmentation models
+  GET  /api/segmentation_models    – segmentation models from monet_bundle_config
   GET  /api/ollama/models          – probe an Ollama server and return its model list
   GET  /api/files/download?path=…  – serve a result file produced by an agent tool
   GET  /health                     – health check
@@ -27,7 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from config import settings
+from config import settings, segmentation_models_from_config
 from agent import stream_agent_response
 from pathlib import Path
 # ── Logging ──────────────────────────────────────────────────────────────────
@@ -98,6 +99,7 @@ class ChatRequest(BaseModel):
     message: str
     history: list[HistoryMessage] = Field(default_factory=list)
     study_context: Optional[StudyContext] = None
+    prompt_image_url: Optional[str] = None
     config: AgentRequestConfig = Field(default_factory=AgentRequestConfig)
 
 
@@ -276,20 +278,7 @@ async def list_models():
     )
     llm_models.extend(ollama_models_list)
 
-    seg_models = [
-        {
-            "id": "totalsegmentator",
-            "name": "TotalSegmentator",
-            "description": "Segment 117 anatomical structures",
-            "type": "totalsegmentator",
-        },
-        {
-            "id": "monet-bundle",
-            "name": "MONet Bundle",
-            "description": "nnUNet-based segmentation",
-            "type": "monet",
-        },
-    ]
+    seg_models = segmentation_models_from_config()
 
     # Add custom endpoints from settings
     if settings.custom_seg_endpoints:
@@ -306,6 +295,12 @@ async def list_models():
                 })
 
     return {"llm": llm_models, "segmentation": seg_models}
+
+
+@app.get("/api/segmentation_models")
+async def list_segmentation_models():
+    """Return segmentation models defined in monet_bundle_config tasks."""
+    return {"models": segmentation_models_from_config()}
 
 
 @app.get("/api/reports/{study_uid}")
@@ -466,6 +461,7 @@ async def chat_stream(request: ChatRequest):
                 segmentation_model=request.config.segmentation_model,
                 api_key=request.config.api_key,
                 language=request.config.language,
+                prompt_image_url=request.prompt_image_url,
             ):
                 yield chunk
         except Exception as exc:

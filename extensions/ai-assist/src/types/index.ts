@@ -1,6 +1,6 @@
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'system' | 'tool';
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'log';
   content: string;
   timestamp: Date;
   toolName?: string;
@@ -8,10 +8,28 @@ export interface ChatMessage {
   toolResult?: string;
   /** Elapsed-time string injected by tool_progress events while the tool runs. */
   toolProgress?: string;
+  /** Live log lines streamed from long-running tools (e.g. Docker segmentation). */
+  toolLogs?: string[];
+  /** True while a log message is still receiving streamed lines. */
+  logActive?: boolean;
   /** Full URL to a downloadable result file produced by the tool (e.g. CSV). */
   downloadUrl?: string;
   /** Human-readable filename shown on the download button. */
   downloadFilename?: string;
+  /** OHIF viewer reload target after segmentation completes. */
+  viewerReload?: ViewerReloadPayload;
+  /** Pre-built viewer URL for opening segmentation mode with the new DICOM SEG. */
+  viewerReloadUrl?: string;
+}
+
+/** Parameters for reloading OHIF in segmentation mode with a DICOM SEG series. */
+export interface ViewerReloadPayload {
+  mode: string;
+  studyInstanceUID: string;
+  seriesInstanceUIDs: string[];
+  initialSeriesInstanceUID?: string;
+  segSeriesInstanceUID?: string;
+  dataSourceName?: string;
 }
 
 export type ChatHistoryStorage = 'localStorage' | 'sessionStorage' | 'none' | 'server';
@@ -82,7 +100,7 @@ export interface ReportEntry {
 }
 
 export interface StreamMessage {
-  type: 'thought' | 'action' | 'observation' | 'final' | 'error' | 'tool_start' | 'tool_end' | 'tool_progress' | 'report_saved';
+  type: 'thought' | 'action' | 'observation' | 'final' | 'error' | 'tool_start' | 'tool_end' | 'tool_progress' | 'tool_log' | 'report_saved';
   content: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
@@ -91,4 +109,6 @@ export interface StreamMessage {
   elapsed?: number;
   /** Server-relative download path for result files produced by a tool (e.g. CSV). */
   downloadUrl?: string;
+  /** Viewer reload parameters when a segmentation tool produced a DICOM SEG. */
+  viewerReload?: ViewerReloadPayload;
 }

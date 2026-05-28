@@ -34,69 +34,77 @@ from .tools import (
     extract_radiomics,
     generate_radiology_report,
     convert_dicom_seg_to_nifti,
+    get_study_metadata,
 )
+from .tools.log_broadcast import activate as activate_tool_logs, deactivate as deactivate_tool_logs, drain as drain_tool_logs
 
-SYSTEM_PROMPT = """You are an expert AI radiology assistant integrated into the OHIF medical imaging viewer.
+_TOOLS_WITH_LIVE_LOGS = frozenset({"run_monet_segmentation"})
 
-You assist radiologists and medical professionals with:
-1. **Organ Segmentation** - Automatically segment anatomical structures using TotalSegmentator or nnU-Net models.
-2. **Radiomics Extraction** - Extract quantitative imaging features from DICOM series using PyRadiomics.
-3. **Report Generation** - Generate structured radiology reports in standard clinical format.
-4. **Study Analysis** - Answer questions about the current DICOM study.
-5. **DICOM SEG Integration** - Use existing DICOM segmentation objects already present in the study.
+SYSTEM_PROMPT = """
+# ROLE AND ENVIRONMENT
+You are an expert AI radiology assistant integrated into the OHIF medical imaging viewer.
+You assist radiologists and medical professionals with complex imaging workflows, but you act as a collaborative partner, not an automated script.
 
-List MONet tasks using the tool `list_monet_tasks`.
-When given a task, follow these priorities:
+# CONVERSATION AND EXECUTION PROTOCOL (CRITICAL)
+1. DO NOT automatically execute heavy processing tools (segmentation, radiomics, NIfTI conversion) without the user's request.
+2. ALWAYS interact first: Acknowledge the user's request, formulate a clear, step-by-step plan of which tools you intend to use, and explicitly ask for the user's confirmation to proceed.
+3. If parameters are missing (e.g., patient ID, specific UIDs), DO NOT guess or hallucinate them. Stop and ask the user to clarify.
+4. The tool for listing available MONet tasks is `list_monet_tasks`. Just execute it when information is needed about the available MONet tasks, without asking the user for confirmation.
+5. If you are unsure what series the study contains (modalities, descriptions, how many series exist), or you need to pick the correct Series Instance UID, call `get_study_metadata` with the Study Instance UID from the study context. Run it without asking for confirmation — it is a read-only lookup.
+6. Before running any tool, be sure to have the correct Study Instance UID and Series Instance UID (for both the image series and the segmentation mask series if applicable) from the correct DICOMweb URL.
 
-**Segmentation mask selection:**
-- If the study context includes `availableSegmentations`, ALWAYS prefer those over running a new
-  segmentation model. Pass the `seg_series_instance_uid` directly to `extract_radiomics`, or call
-  `convert_dicom_seg_to_nifti` first to get the NIfTI mask path(s).
-- Only call TotalSegmentator / nnU-Net if no DICOM SEG is available in the study.
+# CORE CAPABILITIES
+1. **Organ and Lesion Segmentation:** Automatically segment anatomical structures using MONet models. (Retrieve available models using `list_monet_tasks`).
+2. **Radiomics Extraction:** Extract quantitative imaging features from DICOM series using PyRadiomics.
+3. **Report Generation:** Generate structured radiology reports in standard clinical format.
+4. **Study Analysis:** Answer clinical and technical questions about the current DICOM study. Use `get_study_metadata` to discover series when the study context does not list every series or you are uncertain which series to use.
+5. **Segmentation Mask Analysis:** Analyze the segmentation mask and generate a comprehensive description.
 
-**Description of the segmentation:**
-- Analyze the segmentation mask using the tool `convert_dicom_seg_to_nifti` to get a description of the segmentation mask.
-- The description should include the following information, justifying the information provided:
-  - The number of segments in the segmentation mask
-  - The name of the segments(e.g. "Liver", "Lesion_1")
-  - Their volume in milliliters
-  - The number of connected components in the segmentation mask, important for counting the number of objects in the segmentation mask, and their size in milliliters and voxels. This information can be used to provide a consideration about the quality of the segmentation.
-  - The key observations and clinical implications of the segmentation mask.
-  - The considerations about the quality of the segmentation, justified by the information provided in the previous points.
-  - The recommendation for the next steps, based on the information provided in the previous points.
-- If no additional steps are needed, just return the description of the segmentation mask and provide the option to download the segmentation masks as nifti files.
+# WORKFLOW PRIORITIES & TOOL RULES
 
-**Radiomics:**
-- When a DICOM SEG is available, pass its `seg_series_instance_uid` to `extract_radiomics` so
-  features are computed per anatomical segment rather than on the whole volume.
-- Report per-segment feature summaries (mean HU, volume, entropy, etc.) in the final answer.
+## 1. Segmentation Handling
+*   **Mask Selection:** If the study context includes DICOM SEG series (`availableSegmentations`), ALWAYS prefer those over running a new segmentation model.
+*   **Mask Generation:** Always ensure a segmentation mask is available for the study. If one is not present and the workflow requires it, propose running a MONet segmentation model to generate one.
+*   **Mask Selection:** If the mask was just generated, you need to pick the correct Series Instance UID for the image series that was used to generate the mask. Use `get_study_metadata` to find the correct Series Instance UID.
+*   **Mask Analysis:** Use the `convert_dicom_seg_to_nifti` tool to analyze the mask and generate a comprehensive description. Your description MUST include and justify the following:
+    *   The number of segments and their names (e.g., "Liver", "Lesion_1").
+    *   Their volume in milliliters.
+    *   The number of connected components (crucial for counting objects) and their size in milliliters and voxels. Use this to provide considerations on segmentation quality (e.g., over-segmentation or artifacts).
+    *   Key observations and clinical implications of the mask.
+    *   Recommendations for next steps based on the findings.
+*   **Next Steps:** If no further processing is needed after analysis, present the description and explicitly offer the user the option to download the segmentation masks as NIfTI files.
 
-**Report generation:**
-- Reference DICOM SEG segment names by their label (e.g. "Liver", "Lesion_1") when describing findings.
-- Include radiomics highlights per segment when available. Perform a thorough analysis of the radiomics features and the segmentation mask, and provide a detailed description of the findings.
-- As `additional_findings`, include the segmentation mask analysis performed by the tool `convert_dicom_seg_to_nifti` and the radiomics features extracted by the tool `extract_radiomics`.
-- Always check the modality of the series under examination and set it for the `modality` parameter of the `generate_radiology_report` tool.
+## 2. Radiomics Extraction
+*   **Explicit Consent Required:** NEVER call the `extract_radiomics` tool unless it is explicitly requested by the user.
+*   **Targeting:** When a DICOM SEG is available (either pre-existing or newly generated), pass its `seg_series_instance_uid` directly to `extract_radiomics`. This ensures features are computed per anatomical segment rather than on the whole volume.
+*   **Reporting:** Summarize the per-segment features (e.g., mean HU, volume, entropy) clearly in your final answer to the user.
 
-**General:**
-- Think step-by-step about what tools you need.
-- Always compile the report AFTER collecting all available data.
-- Be precise with UIDs and parameters.
-- Be ALWAYS sure that there is a segmentation mask available for the study, if not, run the segmentation model to generate a mask.
-- If something fails, explain the error clearly and suggest alternatives.
-- The `dicomweb_url` parameter in every tool maps to the WADO-RS retrieve
-  endpoint (`wadoRoot` in the study context). It is **optional** — when omitted
-  the server falls back to its configured `DICOMWEB_WADO_ROOT` env var.
-  Never ask the user for a DICOMweb URL; always use `wadoRoot` from the study
-  context (or omit the parameter entirely if absent).
-- When a tool result mentions a downloadable file (e.g. CSV, NIfTI, JSON), tell the user
-  to **click the download button on the tool card** in the chat. Never
-  output raw `/api/files/...` paths or internal server paths — they are not
-  directly clickable in the user's browser. Be sure to generate the exact download URL that the user can click on to download the file, referring to the /api endpoint of the backend.
-- Never call the tool `extract_radiomics` unless it is explicitly requested by the user.
+## 3. Report Generation
+*   **Timing:** Always compile the report AFTER collecting and analyzing all available data.
+*   **Formatting:** Reference DICOM SEG segment names by their exact labels (e.g., "Liver", "Lesion_1") when describing findings.
+*   **Modality:** Always check the modality of the series under examination and pass it accurately to the `modality` parameter of the `generate_radiology_report` tool.
+*   **Content:** Perform a thorough analysis of the radiomics features and the segmentation mask to provide a detailed description of the findings. Under `additional_findings`, you MUST include the segmentation mask analysis (from `convert_dicom_seg_to_nifti`) and the radiomics highlights (from `extract_radiomics`).
 
-Current study context will be provided in the user message when available.
-The `availableSegmentations` field lists DICOM SEG series already loaded in the viewer.
+# GENERAL ENGINEERING RULES
+*   **Reasoning:** Think step-by-step about what tools you need before proposing your plan to the user.
+*   **Precision:** Be highly precise with UIDs and JSON parameters.
+*   **Error Handling:** If a tool fails, explain the error clearly to the user and suggest alternative approaches.
+*   **DICOMweb URL:** The `dicomweb_url` parameter in every tool maps to the WADO-RS retrieve endpoint (`wadoRoot` in the study context). It is OPTIONAL. If omitted, the server falls back to its configured `DICOMWEB_WADO_ROOT`. NEVER ask the user for a DICOMweb URL; use `wadoRoot` from context, or omit the parameter entirely if absent.
+
+Current study context (including the `availableSegmentations` field for loaded DICOM SEG series) will be provided in the user message when available.
 """
+
+
+def _extract_tool_output(raw) -> str:
+    """Normalize LangGraph tool output to a string (often a ToolMessage)."""
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return raw
+    if hasattr(raw, "content"):
+        content = raw.content
+        return content if isinstance(content, str) else str(content)
+    return str(raw)
 
 
 def _save_report(study_uid: str, content: str) -> tuple[Path, int]:
@@ -113,7 +121,7 @@ def _save_report(study_uid: str, content: str) -> tuple[Path, int]:
     """
     study_dir = settings.reports_output_dir / study_uid
     study_dir.mkdir(parents=True, exist_ok=True)
-
+    study_dir.chmod(0o777)
     existing = sorted(study_dir.glob("v[0-9][0-9][0-9]_*.md"))
     version = len(existing) + 1
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -132,9 +140,11 @@ def _build_tools(segmentation_model: str) -> list:
     active_seg = seg_tools.get(segmentation_model, run_monet_segmentation)
 
     return [
+        get_study_metadata,
         convert_dicom_seg_to_nifti,
+        list_monet_tasks,
         active_seg,
-        run_custom_segmentation,
+        #run_custom_segmentation,
         extract_radiomics,
         generate_radiology_report,
     ]
@@ -149,6 +159,7 @@ async def stream_agent_response(
     segmentation_model: str,
     api_key: Optional[str] = None,
     language: str = "English",
+    prompt_image_url: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """
     Run the ReAct agent and yield Server-Sent Events (SSE) data strings.
@@ -225,7 +236,14 @@ async def stream_agent_response(
                 ctx_parts.append(f"  singlepart: {settings.dicomweb_singlepart}")
             user_content = f"{message}\n\n[Current Study Context]\n" + "\n".join(ctx_parts)
 
-    lc_messages.append(HumanMessage(content=user_content))
+    if prompt_image_url:
+        user_message_content = [
+            {"type": "text", "text": user_content},
+            {"type": "image_url", "image_url": {"url": prompt_image_url}},
+        ]
+        lc_messages.append(HumanMessage(content=user_message_content))
+    else:
+        lc_messages.append(HumanMessage(content=user_content))
 
     # ── Shared mutable state accessed by both coroutines ──────────────────────
     # Using a dict avoids needing `nonlocal` inside nested async functions.
@@ -233,6 +251,7 @@ async def stream_agent_response(
         "final_answer": "",
         "tool_running": False,    # True while a tool thread is executing
         "tool_start_time": 0.0,   # monotonic time when the current tool started
+        "current_tool_name": None,
         "report_study_uid": None, # set when generate_radiology_report is invoked
         # Token buffering: accumulate LLM tokens before sending SSE events so
         # the frontend receives larger, evenly-spaced chunks rather than a
@@ -278,6 +297,9 @@ async def stream_agent_response(
                     state["tool_running"] = True
                     state["tool_start_time"] = time.monotonic()
                     tool_name = event.get("name", "tool")
+                    state["current_tool_name"] = tool_name
+                    if tool_name in _TOOLS_WITH_LIVE_LOGS:
+                        activate_tool_logs()
                     tool_input = data.get("input", {})
                     # Remember the study UID so we can save the final report.
                     if tool_name == "generate_radiology_report":
@@ -293,14 +315,25 @@ async def stream_agent_response(
                     }))
 
                 elif kind == "on_tool_end":
-                    state["tool_running"] = False
                     tool_name = event.get("name", "tool")
-                    tool_output = data.get("output", "")
+                    if tool_name in _TOOLS_WITH_LIVE_LOGS:
+                        deactivate_tool_logs()
+                        for line in drain_tool_logs():
+                            await queue.put(_sse({
+                                "type": "tool_log",
+                                "toolName": tool_name,
+                                "content": line,
+                            }))
+                    state["tool_running"] = False
+                    state["current_tool_name"] = None
+                    tool_output = _extract_tool_output(data.get("output", ""))
                     download_url: str | None = None
+                    viewer_reload: dict | None = None
                     try:
                         parsed = json.loads(tool_output)
                         display = parsed.get("message", tool_output)
                         download_url = parsed.get("download_url")
+                        viewer_reload = parsed.get("viewer_reload")
                     except Exception:
                         display = str(tool_output)[:500]
                     sse_payload: dict = {
@@ -311,6 +344,8 @@ async def stream_agent_response(
                     }
                     if download_url:
                         sse_payload["downloadUrl"] = download_url
+                    if viewer_reload:
+                        sse_payload["viewerReload"] = viewer_reload
                     await queue.put(_sse(sse_payload))
 
                 elif kind == "on_chat_model_end":
@@ -342,9 +377,25 @@ async def stream_agent_response(
                     "content": f"{elapsed}s elapsed",
                 }))
 
+    LOG_DRAIN_INTERVAL = 0.5  # seconds
+
+    async def _drain_tool_logs() -> None:
+        while True:
+            await asyncio.sleep(LOG_DRAIN_INTERVAL)
+            if not state["tool_running"]:
+                continue
+            tool_name = state.get("current_tool_name")
+            for line in drain_tool_logs():
+                await queue.put(_sse({
+                    "type": "tool_log",
+                    "toolName": tool_name,
+                    "content": line,
+                }))
+
     # ── Start both tasks and drain the queue ──────────────────────────────────
     agent_task = asyncio.create_task(_consume_agent_events())
     hb_task = asyncio.create_task(_heartbeat())
+    log_task = asyncio.create_task(_drain_tool_logs())
 
     try:
         while True:
@@ -354,11 +405,13 @@ async def stream_agent_response(
             yield item
     finally:
         hb_task.cancel()
+        log_task.cancel()
         # Absorb the CancelledError so it doesn't propagate
-        try:
-            await hb_task
-        except asyncio.CancelledError:
-            pass
+        for task in (hb_task, log_task):
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     yield _sse({"type": "final", "content": state["final_answer"]})
 

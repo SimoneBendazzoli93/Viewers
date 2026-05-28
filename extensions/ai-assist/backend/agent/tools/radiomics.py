@@ -91,15 +91,18 @@ def extract_radiomics(
     series_dir = settings.dicom_cache_dir / study_instance_uid / series_instance_uid
     radiomics_dir = settings.radiomics_output_dir / study_instance_uid / series_instance_uid
     radiomics_dir.mkdir(parents=True, exist_ok=True)
-
+    radiomics_dir.chmod(0o777)
     # Fetch and convert image series
-    dcm_files = fetch_series_to_dir(url, study_instance_uid, series_instance_uid, series_dir)
-    if not dcm_files:
-        return json.dumps({"error": "No DICOM files found for the requested series."})
+    if not series_dir.exists():
+        dcm_files = fetch_series_to_dir(url, study_instance_uid, series_instance_uid, series_dir)
+        if not dcm_files:
+            return json.dumps({"error": "No DICOM files found for the requested series."})
 
     image_nifti = radiomics_dir / "image.nii.gz"
-    if not _convert_dcm_to_nifti(series_dir, image_nifti):
-        return json.dumps({"error": "Failed to convert DICOM series to NIfTI."})
+
+    if not image_nifti.exists():
+        if not _convert_dcm_to_nifti(series_dir, image_nifti):
+            return json.dumps({"error": "Failed to convert DICOM series to NIfTI."})
 
     # ── Resolve mask(s) ──────────────────────────────────────────────────────
     # Priority: explicit mask_path > DICOM SEG series > whole-volume fallback
@@ -110,23 +113,29 @@ def extract_radiomics(
         masks["provided_mask"] = mask_path
 
     elif seg_series_instance_uid:
-        seg_cache_dir = settings.dicom_cache_dir / study_instance_uid / seg_series_instance_uid
+        seg_cache_dir = settings.segmentation_output_dir / study_instance_uid / series_instance_uid
         seg_output_dir = (
             settings.segmentation_output_dir
             / study_instance_uid
-            / seg_series_instance_uid
-            / "dicom_seg"
+            / series_instance_uid
         )
-        seg_dcm_files = fetch_series_to_dir(
-            url, study_instance_uid, seg_series_instance_uid, seg_cache_dir
-        )
-        if not seg_dcm_files:
-            return json.dumps({"error": f"No DICOM SEG files found for series {seg_series_instance_uid}."})
+        if not seg_cache_dir.exists():
+            seg_dcm_files = fetch_series_to_dir(
+                url, study_instance_uid, seg_series_instance_uid, seg_cache_dir
+            )
+            if not seg_dcm_files:
+                return json.dumps({"error": f"No DICOM SEG files found for series {seg_series_instance_uid}."})
+        else:
+            seg_dcm_files = list(seg_cache_dir.glob("*.dcm"))
+            print(f"Found {len(seg_dcm_files)} DICOM SEG files in cache: {seg_dcm_files}")
+
         try:
             masks = convert_seg_file_to_nifti(
-                seg_dcm_files[0], seg_output_dir, reference_image_path=image_nifti
+                seg_dcm_files[0], seg_output_dir, series_dir
             )
+            print(f"Masks: {masks}")
         except Exception as exc:
+            print(f"DICOM SEG conversion failed: {exc}")
             return json.dumps({"error": f"DICOM SEG conversion failed: {exc}"})
         if not masks:
             return json.dumps({"error": "DICOM SEG file contained no segments."})
@@ -154,9 +163,12 @@ def extract_radiomics(
     # ── Run extraction per segment ────────────────────────────────────────────
     per_segment: dict[str, dict] = {}
 
+    label_id = 0
     for label, mask_file in masks.items():
+        print(f"Extracting features for segment {label} with mask {mask_file}")
         try:
-            result = extractor.execute(str(image_nifti), str(mask_file))
+            label_id += 1
+            result = extractor.execute(str(image_nifti), str(mask_file), label=label_id)
         except Exception as exc:
             per_segment[label] = {"error": str(exc)}
             continue

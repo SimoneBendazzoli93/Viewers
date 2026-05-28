@@ -4,9 +4,10 @@ All settings can be overridden via environment variables or a .env file.
 """
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Literal
+import json
 import os
+from pathlib import Path
+from typing import Any, Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -62,7 +63,8 @@ class Settings(BaseSettings):
     # Backward-compat shortcut: set DICOMWEB_URL to use the same URL for
     # all three roots (WADO-RS, QIDO-RS, WADO-URI).  The specific vars
     # take precedence over DICOMWEB_URL when both are set.
-    dicomweb_url: str | None = None            # shortcut → all three roots
+    dicomweb_url: str | None = os.getenv("DICOMWEB_URL")            # shortcut → all three roots
+    orthanc_url: str | None = os.getenv("ORTHANC_URL")
     dicomweb_wado_root: str | None = None      # WADO-RS base URL (retrieve)
     dicomweb_qido_root: str | None = None      # QIDO-RS base URL (search)
     dicomweb_wado_uri_root: str | None = None  # WADO-URI base URL
@@ -74,12 +76,12 @@ class Settings(BaseSettings):
     default_segmentation_model: str = "totalsegmentator"
 
     # Directory where DICOM files are temporarily cached
-    dicom_cache_dir: Path = Path("/data/ohif-ai-dicom-cache")
+    dicom_cache_dir: Path = Path( os.getenv("DICOM_CACHE_DIR", "/data/ohif-ai-dicom-cache"))
 
     host_dicom_cache_dir: Path = Path(os.getenv("HOST_DICOM_CACHE_DIR", "/data/ohif-ai-dicom-cache"))
 
     # Directory where segmentation masks are saved
-    segmentation_output_dir: Path = Path("/data/ohif-ai-seg-output")
+    segmentation_output_dir: Path = Path(os.getenv("SEGMENTATION_OUTPUT_DIR", "/data/ohif-ai-seg-output"))
 
     host_segmentation_output_dir: Path = Path(os.getenv("HOST_SEGMENTATION_OUTPUT_DIR", "/data/ohif-ai-seg-output"))
 
@@ -107,10 +109,39 @@ class Settings(BaseSettings):
     # Each study gets its own file: <chat_history_dir>/<studyInstanceUID>.json
     chat_history_dir: Path = Path("/data/ohif-ai-chat-history")
 
-    monet_bundle_config: dict = json.load(open(os.getenv("MONET_BUNDLE_CONFIG_FILE")))
+    monet_bundle_config: dict = Field(default_factory=dict)
+
+    backend_type: Literal["kubernetes", "docker"] = os.getenv("BACKEND_TYPE", "docker")
+    namespace: str | None = os.getenv("NAMESPACE")
+
+
+
+def _load_monet_bundle_config() -> dict:
+    path = os.getenv("MONET_BUNDLE_CONFIG_FILE")
+    if not path:
+        return {"tasks": {}}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def segmentation_models_from_config() -> list[dict[str, Any]]:
+    """Build frontend segmentation model entries from monet_bundle_config tasks."""
+    models: list[dict[str, Any]] = []
+    for task in settings.monet_bundle_config.get("tasks", {}).values():
+        task_name = task.get("task_name")
+        if not task_name:
+            continue
+        models.append({
+            "id": task_name,
+            "name": task_name,
+            "description": task.get("description", ""),
+            "type": task.get("type", "monet"),
+        })
+    return models
 
 
 settings = Settings()
+settings.monet_bundle_config = _load_monet_bundle_config()
 
 # Ensure output dirs exist on startup
 settings.dicom_cache_dir.mkdir(parents=True, exist_ok=True)

@@ -1,9 +1,26 @@
 import { Types } from '@ohif/core';
 import { AIAgentService } from './services/AIAgentService';
+import { buildSegmentationViewerUrl } from './utils/buildSegmentationViewerUrl';
+import { discoverStudySegmentations } from './utils/discoverStudySegmentations';
 
 const agentService = new AIAgentService();
 
-function getCommandsModule({ servicesManager, commandsManager }): Types.CommandsModule {
+function getStudyUIDFromServices(servicesManager: AppTypes.ServicesManager): string | null {
+  try {
+    const { viewportGridService, displaySetService } = servicesManager.services;
+    const { activeViewportId, viewports } = viewportGridService.getState();
+    const viewport = viewports.get(activeViewportId);
+    if (!viewport?.displaySetInstanceUIDs?.length) {
+      return null;
+    }
+    const displaySet = displaySetService.getDisplaySetByUID(viewport.displaySetInstanceUIDs[0]);
+    return displaySet?.StudyInstanceUID ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function getCommandsModule({ servicesManager, extensionManager }): Types.CommandsModule {
   const { uiNotificationService } = servicesManager.services;
 
   return {
@@ -74,6 +91,41 @@ function getCommandsModule({ servicesManager, commandsManager }): Types.Commands
             duration: 4000,
           });
           return ok;
+        },
+      },
+
+      /**
+       * Reload the viewer in segmentation mode with a DICOM SEG series loaded.
+       */
+      openStudyInSegmentationMode: {
+        commandFn: async ({
+          studyInstanceUID,
+        }: {
+          studyInstanceUID?: string;
+          seriesInstanceUIDs?: string[];
+          initialSeriesInstanceUID?: string;
+          segSeriesInstanceUID?: string;
+        } = {}) => {
+          const studyUID =
+            studyInstanceUID ?? getStudyUIDFromServices(servicesManager);
+          const discovery = await discoverStudySegmentations(
+            extensionManager,
+            servicesManager,
+            studyUID
+          );
+          if (!discovery) {
+            uiNotificationService?.show?.({
+              title: 'MAIA Radiology Assistant',
+              message: 'No DICOM SEG series found for the active study.',
+              type: 'warning',
+              duration: 5000,
+            });
+            return;
+          }
+          const dataSourceName = extensionManager?.activeDataSourceName as string | undefined;
+          window.location.assign(
+            buildSegmentationViewerUrl(discovery.viewerReload, dataSourceName)
+          );
         },
       },
 

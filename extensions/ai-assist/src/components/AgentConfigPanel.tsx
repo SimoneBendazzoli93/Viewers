@@ -110,6 +110,31 @@ export function AgentConfigPanel({ config, onSave, onClose }: Props) {
     }
   }, [isOllama]); // intentionally only on provider switch, not on every keystroke
 
+  // Load segmentation models from the backend when the panel opens or backend URL changes
+  useEffect(() => {
+    const backendUrl = local.backendUrl;
+    fetch(buildBackendUrl(backendUrl, '/api/segmentation_models'))
+      .then(resp => (resp.ok ? resp.json() : null))
+      .then(data => {
+        if (!data?.models?.length) return;
+        setLocal(prev => {
+          const custom = prev.segmentationModels.filter(m => m.type === 'custom');
+          const merged = [...data.models, ...custom];
+          const activeStillValid = merged.some(m => m.id === prev.activeSegmentationModel);
+          return {
+            ...prev,
+            segmentationModels: merged,
+            activeSegmentationModel: activeStillValid
+              ? prev.activeSegmentationModel
+              : merged[0]?.id ?? '',
+          };
+        });
+      })
+      .catch(() => {
+        // keep existing models on error
+      });
+  }, [local.backendUrl]);
+
   const handleProviderChange = (provider: LLMProvider) => {
     const firstStatic = DEFAULT_LLM_MODELS.find(m => m.provider === provider);
     setLocal(prev => ({

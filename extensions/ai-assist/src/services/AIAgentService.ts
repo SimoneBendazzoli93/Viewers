@@ -1,25 +1,12 @@
-import type { AgentConfig, ChatMessage, ReportEntry, StreamMessage } from '../types';
+import type { AgentConfig, ChatMessage, ReportEntry, SegmentationModelConfig, StreamMessage } from '../types';
 import { buildBackendUrl } from '../utils/backendUrl';
 
 const DEFAULT_CONFIG: AgentConfig = {
   backendUrl: 'http://localhost:8000',
   llmProvider: 'openai',
   llmModel: 'gpt-4o',
-  segmentationModels: [
-    {
-      id: 'totalsegmentator',
-      name: 'TotalSegmentator',
-      description: 'Segment 117 anatomical structures',
-      type: 'totalsegmentator',
-    },
-    {
-      id: 'monet-bundle',
-      name: 'MONet Bundle',
-      description: 'nnUNet-based segmentation',
-      type: 'monet',
-    },
-  ],
-  activeSegmentationModel: 'monet-bundle',
+  segmentationModels: [],
+  activeSegmentationModel: '',
   chatHistoryStorage: 'localStorage',
   language: 'English',
 } satisfies AgentConfig;
@@ -258,6 +245,39 @@ export class AIAgentService {
     }
   }
 
+  async fetchSegmentationModels(): Promise<SegmentationModelConfig[]> {
+    try {
+      const resp = await fetch(
+        buildBackendUrl(this.config.backendUrl, '/api/segmentation_models')
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        return (data.models ?? []) as SegmentationModelConfig[];
+      }
+    } catch {
+      // return empty on error
+    }
+    return [];
+  }
+
+  /**
+   * Load segmentation models from the backend and merge with any custom models
+   * stored in the local config. Updates activeSegmentationModel when the current
+   * selection is no longer available.
+   */
+  async refreshSegmentationModels(): Promise<SegmentationModelConfig[]> {
+    const fromApi = await this.fetchSegmentationModels();
+    const custom = this.config.segmentationModels.filter(m => m.type === 'custom');
+    const merged = [...fromApi, ...custom];
+
+    const updates: Partial<AgentConfig> = { segmentationModels: merged };
+    if (merged.length > 0 && !merged.some(m => m.id === this.config.activeSegmentationModel)) {
+      updates.activeSegmentationModel = merged[0].id;
+    }
+    this.updateConfig(updates);
+    return merged;
+  }
+
   async getAvailableModels(): Promise<{ llm: LLMModelOption[]; segmentation: SegmentationModelConfig[] }> {
     try {
       const resp = await fetch(buildBackendUrl(this.config.backendUrl, '/api/models'));
@@ -267,7 +287,8 @@ export class AIAgentService {
     } catch {
       // return defaults on error
     }
-    return { llm: DEFAULT_LLM_MODELS, segmentation: this.config.segmentationModels };
+    const segmentation = await this.fetchSegmentationModels();
+    return { llm: DEFAULT_LLM_MODELS, segmentation };
   }
 }
 
@@ -286,13 +307,6 @@ interface LLMModelOption {
   name: string;
   provider: string;
   description?: string;
-}
-
-interface SegmentationModelConfig {
-  id: string;
-  name: string;
-  description: string;
-  type: string;
 }
 
 // Static models for cloud providers only. Ollama models are fetched live from the backend.

@@ -22,255 +22,74 @@ from langchain_core.tools import tool
 from config import settings
 from .dicom_utils import fetch_series_to_dir, resolve_dicomweb_url
 import SimpleITK as sitk
+import highdicom as hd
 logger = logging.getLogger(__name__)
 
-
-# ── Geometry helpers ──────────────────────────────────────────────────────────
-
-def _resample_mask_to_reference(mask_img: sitk.Image, reference_path: Path) -> sitk.Image:
-    """Resample a binary mask onto the reference image grid (size, spacing, origin, direction)."""
-    reference = sitk.ReadImage(str(reference_path))
-    resampler = sitk.ResampleImageFilter()
-    resampler.SetReferenceImage(reference)
-    resampler.SetInterpolator(sitk.sitkNearestNeighbor)
-    resampler.SetDefaultPixelValue(0)
-    resampler.SetTransform(sitk.Transform())
-    return resampler.Execute(mask_img)
-
-
-def _iop_to_direction(iop: list[float]) -> tuple[float, ...]:
+def convert_seg_file_to_nifti(seg_file_path, output_nifti_path, ref_dicom_dir):
     """
-    Build a 9-element direction cosine tuple (row, col, normal) from a
-    6-element ImageOrientationPatient list.
+    Converts a DICOM SEG file to a NIfTI file using highdicom, perfectly
+    matching the spatial dimensions of the reference DICOM series.
     """
-    row = np.array(iop[:3])
-    col = np.array(iop[3:])
-    normal = np.cross(row, col)
-    return tuple(row.tolist() + col.tolist() + normal.tolist())
+    print(f"Loading reference DICOM series from: {ref_dicom_dir}")
 
+    # 1. Use SimpleITK to find and sort the reference DICOM files properly
+    series_reader = sitk.ImageSeriesReader()
+    print(f"Reference directory: {ref_dicom_dir}")
+    dicom_names = series_reader.GetGDCMSeriesFileNames(str(ref_dicom_dir))
+    if not dicom_names:
+        raise FileNotFoundError(f"No DICOM files found in reference directory: {ref_dicom_dir}")
 
-def _convert_seg_pydicom(
-    seg_dcm: pydicom.Dataset,
-    output_dir: Path,
-    reference_image_path: Optional[Path] = None,
-) -> dict[str, str]:
-    """
-    Pure pydicom + SimpleITK DICOM SEG → NIfTI conversion.
+    # Read the full 3D reference image to get spatial metadata
+    series_reader.SetFileNames(dicom_names)
+    ref_image = series_reader.Execute()
+    print(f"Reference volume size: {ref_image.GetSize()}")
 
-    Returns a dict mapping segment label → absolute NIfTI path.
-    """
-    import SimpleITK as sitk
+    # 2. Extract SOPInstanceUIDs in the exact order SimpleITK sorted them.
+    # This guarantees the segmentation's Z-axis will strictly match the NIfTI reference volume.
+    print("Extracting SOPInstanceUIDs for accurate slice alignment...")
+    source_uids = []
+    for f in dicom_names:
+        # We only need the metadata, so stop_before_pixels saves memory and time
+        dcm = pydicom.dcmread(f, stop_before_pixels=True)
+        source_uids.append(dcm.SOPInstanceUID)
 
-    pixel_array: np.ndarray = seg_dcm.pixel_array  # (frames, rows, cols) or (rows, cols)
-    if pixel_array.ndim == 2:
-        pixel_array = pixel_array[np.newaxis, ...]
+    # 3. Read the DICOM SEG file using highdicom
+    print(f"Loading DICOM SEG: {seg_file_path}")
+    masks = {}
+    seg = hd.seg.segread(seg_file_path)
+    for seg_num in seg.segment_numbers:
+        desc = seg.get_segment_description(seg_num)
+        label = desc.segment_label or f"Segment_{seg_num}"
+        if (output_nifti_path / f"seg_{seg_num}_{label}.nii.gz").exists():
+            print(f"Segment {seg_num} found in {output_nifti_path}")
+            masks[label] = str(output_nifti_path / f"seg_{seg_num}_{label}.nii.gz")
+            continue
+        # 4. Extract the segmentation array
+        print("Mapping DICOM SEG frames to source reference slices...")
+        # combine_segments=True merges all classes into a single 3D integer label mask
+        # The output array shape is automatically (slices, rows, columns)
+        mask_array = seg.get_pixels_by_source_instance(
+            source_sop_instance_uids=source_uids,
+            segment_numbers=[seg_num],
+            combine_segments=True,
+            skip_overlap_checks=True  # Allows merging safely even if structures spatially overlap
+        )
 
-    n_frames, rows, cols = pixel_array.shape
+        # Ensure it's treated as unsigned integers for NIfTI segmentation labels
+        mask_array = mask_array.astype(np.uint16)
 
-    # ── Segment metadata ──
-    segments: dict[int, str] = {}
-    for seg_desc in getattr(seg_dcm, "SegmentSequence", []):
-        seg_num = int(seg_desc.SegmentNumber)
-        label = getattr(seg_desc, "SegmentLabel", f"Segment_{seg_num}")
-        segments[seg_num] = label
+        # 5. Convert the resulting NumPy array back into a SimpleITK image
+        seg_image = sitk.GetImageFromArray(mask_array)
 
-    if not segments:
-        segments[1] = "Segment_1"
+        # 6. Copy spatial metadata (Origin, Spacing, Direction/Cosines) from the reference image
+        seg_image.CopyInformation(ref_image)
 
-    # ── Per-frame geometry ──
-    frame_to_seg: dict[int, int] = {}
-    ipp_list: list[list[float]] = []
-    iop: list[float] = [1, 0, 0, 0, 1, 0]
-    pixel_spacing: list[float] = [1.0, 1.0]
+        # 7. Write the aligned mask to a NIfTI file
+        sitk.WriteImage(seg_image, output_nifti_path / f"seg_{seg_num}_{label}.nii.gz")
+        print(f"Successfully saved perfectly aligned NIfTI mask to: {output_nifti_path}")
+        masks[label] = str(output_nifti_path / f"seg_{seg_num}_{label}.nii.gz")
+    return masks
 
-    per_frame = getattr(seg_dcm, "PerFrameFunctionalGroupsSequence", None)
-    if per_frame:
-        for i, fg in enumerate(per_frame):
-            # Segment assignment
-            seg_id_seq = getattr(fg, "SegmentIdentificationSequence", None)
-            if seg_id_seq:
-                frame_to_seg[i] = int(seg_id_seq[0].ReferencedSegmentNumber)
-            else:
-                frame_to_seg[i] = 1
-
-            # Image position
-            plane_pos = getattr(fg, "PlanePositionSequence", None)
-            if plane_pos:
-                ipp_list.append([float(v) for v in plane_pos[0].ImagePositionPatient])
-            else:
-                ipp_list.append([0.0, 0.0, float(i)])
-
-            # Orientation (only need once)
-            if i == 0:
-                plane_ori = getattr(fg, "PlaneOrientationSequence", None)
-                if plane_ori:
-                    iop = [float(v) for v in plane_ori[0].ImageOrientationPatient]
-                pix_meas = getattr(fg, "PixelMeasuresSequence", None)
-                if pix_meas:
-                    pixel_spacing = [float(v) for v in pix_meas[0].PixelSpacing]
-    else:
-        # Fallback: shared functional groups or top-level tags
-        shared = getattr(seg_dcm, "SharedFunctionalGroupsSequence", [None])[0]
-        if shared:
-            plane_ori = getattr(shared, "PlaneOrientationSequence", None)
-            if plane_ori:
-                iop = [float(v) for v in plane_ori[0].ImageOrientationPatient]
-            pix_meas = getattr(shared, "PixelMeasuresSequence", None)
-            if pix_meas:
-                pixel_spacing = [float(v) for v in pix_meas[0].PixelSpacing]
-
-        ipp = [float(v) for v in getattr(seg_dcm, "ImagePositionPatient", [0, 0, 0])]
-        ipp_list = [ipp for _ in range(n_frames)]
-        for i in range(n_frames):
-            frame_to_seg[i] = 1
-
-    # ── Sort frames by position along the normal ──
-    normal = np.cross(np.array(iop[:3]), np.array(iop[3:]))
-    positions = [float(np.dot(normal, np.array(ipp))) for ipp in ipp_list]
-    sorted_idx = np.argsort(positions)
-    pixel_array = pixel_array[sorted_idx]
-    ipp_list = [ipp_list[i] for i in sorted_idx]
-    frame_to_seg = {new_i: frame_to_seg[old_i] for new_i, old_i in enumerate(sorted_idx)}
-
-    # ── z-spacing ──
-    z_spacing = 1.0
-    if len(positions) > 1:
-        sorted_pos = sorted(positions)
-        z_spacing = abs(sorted_pos[1] - sorted_pos[0]) if sorted_pos[1] != sorted_pos[0] else 1.0
-
-    origin = tuple(ipp_list[0]) if ipp_list else (0.0, 0.0, 0.0)
-    direction = _iop_to_direction(iop)
-
-    # ── Write one NIfTI per segment ──
-    results: dict[str, str] = {}
-    for seg_num, label in segments.items():
-        mask = np.zeros((n_frames, rows, cols), dtype=np.uint8)
-        for frame_idx, s_num in frame_to_seg.items():
-            if s_num == seg_num and frame_idx < n_frames:
-                mask[frame_idx] = (pixel_array[frame_idx] > 0).astype(np.uint8)
-
-        mask_img = sitk.GetImageFromArray(mask)
-        mask_img.SetSpacing((pixel_spacing[1], pixel_spacing[0], z_spacing))
-        mask_img.SetOrigin(origin)
-        mask_img.SetDirection(direction)
-        if reference_image_path:
-            mask_img = _resample_mask_to_reference(mask_img, reference_image_path)
-
-        safe_label = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)
-        out_path = output_dir / f"seg_{seg_num}_{safe_label}.nii.gz"
-        sitk.WriteImage(mask_img, str(out_path))
-        logger.info("Wrote mask for segment '%s' → %s", label, out_path)
-        results[label] = str(out_path)
-
-    return results
-
-
-def convert_seg_file_to_nifti(
-    seg_dcm_path: Path,
-    output_dir: Path,
-    reference_image_path: Optional[Path] = None,
-) -> dict[str, str]:
-    """
-    Convert a single DICOM SEG file to per-segment NIfTI masks.
-    Tries highdicom first; falls back to the pure-pydicom implementation.
-
-    When reference_image_path is set, each mask is resampled onto that image's
-    grid so size, orientation, and spacing match the source volume.
-
-    Returns {segment_label: nifti_path}.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        import highdicom as hd
-        import SimpleITK as sitk
-
-        seg = hd.seg.segread(str(seg_dcm_path))
-        results: dict[str, str] = {}
-
-        source_uids = [uids[2] for uids in seg.get_source_image_uids()]
-
-        for seg_num in seg.segment_numbers:
-            desc = seg.get_segment_description(seg_num)
-            label = desc.segment_label or f"Segment_{seg_num}"
-
-            # get_pixels_by_segment returns (frames, rows, cols, 1) for binary segs
-            try:
-                # 2. Reconstruct the full pixel array for this specific segment
-                arr = seg.get_pixels_by_source_instance(
-                    source_sop_instance_uids=source_uids,
-                    segment_numbers=[seg_num],
-                    ignore_spatial_locations=True # Useful if you are just looking to extract the raw mask stack
-                )
-                mask = arr[..., 0].astype(np.uint8)
-            except Exception as exc:
-                logger.warning("highdicom get_pixels_by_source_instance failed for seg %d: %s", seg_num, exc)
-                continue
-
-            mask_img = sitk.GetImageFromArray(mask)
-
-            shared = getattr(seg, "SharedFunctionalGroupsSequence", None)
-            if shared and len(shared) > 0:
-                shared_group = shared[0]
-
-                # --- 1. Pixel Spacing & Thickness ---
-                pix_meas = getattr(shared_group, "PixelMeasuresSequence", None)
-                if pix_meas and len(pix_meas) > 0:
-                    meas = pix_meas[0]
-                    if hasattr(meas, "PixelSpacing") and len(meas.PixelSpacing) >= 2:
-                        ps = [float(v) for v in meas.PixelSpacing]
-                        st = float(getattr(meas, "SliceThickness", 1.0))
-                        mask_img.SetSpacing((ps[1], ps[0], st))
-
-                # --- 2. Image Orientation (Direction) ---
-                plane_orient = getattr(shared_group, "PlaneOrientationSequence", None)
-                if plane_orient and len(plane_orient) > 0:
-                    orient = plane_orient[0]
-                    if hasattr(orient, "ImageOrientationPatient") and len(orient.ImageOrientationPatient) >= 6:
-                        iop = [float(v) for v in orient.ImageOrientationPatient]
-                        row_cosine = np.array(iop[0:3])
-                        col_cosine = np.array(iop[3:6])
-                        slice_cosine = np.cross(row_cosine, col_cosine)
-
-                        direction_matrix = (
-                            row_cosine[0], row_cosine[1], row_cosine[2],
-                            col_cosine[0], col_cosine[1], col_cosine[2],
-                            slice_cosine[0], slice_cosine[1], slice_cosine[2]
-                        )
-                        mask_img.SetDirection(direction_matrix)
-
-            # --- 3. Image Origin (from Per-Frame Groups) ---
-            per_frame_groups = getattr(seg, "PerFrameFunctionalGroupsSequence", None)
-            if per_frame_groups and len(per_frame_groups) > 0:
-                # Grab the first frame to establish the origin of the 3D volume
-                first_frame = per_frame_groups[0]
-                plane_pos = getattr(first_frame, "PlanePositionSequence", None)
-
-                if plane_pos and len(plane_pos) > 0:
-                    pos = plane_pos[0]
-
-                    # Safely check if ImagePositionPatient exists and has 3 coordinates
-                    if hasattr(pos, "ImagePositionPatient") and len(pos.ImagePositionPatient) >= 3:
-                        origin = [float(v) for v in pos.ImagePositionPatient]
-                        mask_img.SetOrigin(tuple(origin))
-            if reference_image_path:
-                mask_img = _resample_mask_to_reference(mask_img, reference_image_path)
-            safe_label = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)
-            out_path = output_dir / f"seg_{seg_num}_{safe_label}.nii.gz"
-            sitk.WriteImage(mask_img, str(out_path))
-            logger.info("highdicom: wrote mask for '%s' → %s", label, out_path)
-            results[label] = str(out_path)
-
-        if results:
-            return results
-        # Fall through to pydicom if highdicom returned nothing
-    except ImportError:
-        logger.debug("highdicom not installed, using pydicom fallback")
-    except Exception as exc:
-        logger.warning("highdicom conversion failed (%s), falling back to pydicom", exc)
-
-    ds = pydicom.dcmread(str(seg_dcm_path))
-    return _convert_seg_pydicom(ds, output_dir, reference_image_path)
 
 
 # ── LangChain tool ────────────────────────────────────────────────────────────
@@ -279,6 +98,7 @@ def convert_seg_file_to_nifti(
 def convert_dicom_seg_to_nifti(
     study_instance_uid: str,
     seg_series_instance_uid: str,
+    img_series_instance_uid: str,
     dicomweb_url: Optional[str] = None,
 ) -> str:
     """
@@ -288,10 +108,14 @@ def convert_dicom_seg_to_nifti(
     Use this tool BEFORE running extract_radiomics when a DICOM SEG is
     available in the study, so that region-specific radiomics features can
     be computed.
+    The image series is the series that contains the image that was used to generate the segmentation mask.
+    It is used to get the spatial metadata of the image that was used to generate the segmentation mask.
+    This is crucial for the correct alignment of the segmentation mask to the image.
 
     Args:
         study_instance_uid: DICOM Study Instance UID.
         seg_series_instance_uid: Series Instance UID of the DICOM SEG series.
+        img_series_instance_uid: Series Instance UID of the DICOM image series.
         dicomweb_url: DICOMweb WADO-RS base URL (e.g. http://orthanc:8042/wado).
             Optional — falls back to the server's DICOMWEB_URL env var.
 
@@ -303,8 +127,9 @@ def convert_dicom_seg_to_nifti(
     except ValueError as exc:
         return json.dumps({"error": str(exc)})
 
-    seg_dir = settings.dicom_cache_dir / study_instance_uid / seg_series_instance_uid
-    output_dir = settings.segmentation_output_dir / study_instance_uid / seg_series_instance_uid / "dicom_seg"
+    seg_dir = settings.segmentation_output_dir / study_instance_uid / img_series_instance_uid
+    output_dir = settings.segmentation_output_dir / study_instance_uid / img_series_instance_uid
+    image_dir = settings.dicom_cache_dir / study_instance_uid / img_series_instance_uid
 
     dcm_files = fetch_series_to_dir(url, study_instance_uid, seg_series_instance_uid, seg_dir)
     if not dcm_files:
@@ -314,7 +139,7 @@ def convert_dicom_seg_to_nifti(
     seg_file = dcm_files[0]
 
     try:
-        masks = convert_seg_file_to_nifti(seg_file, output_dir)
+        masks = convert_seg_file_to_nifti(seg_file, output_dir, image_dir)
         volumes_ml = {}
         connected_components = {}
         for label, path in masks.items():

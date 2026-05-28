@@ -10,6 +10,8 @@ import type {
 } from '../types';
 import { AIAgentService } from '../services/AIAgentService';
 import { buildBackendUrl, parseResolvableUrl } from '../utils/backendUrl';
+import { buildSegmentationViewerUrl } from '../utils/buildSegmentationViewerUrl';
+import { discoverStudySegmentations } from '../utils/discoverStudySegmentations';
 import { ChatMessage as ChatMessageComponent } from '../components/ChatMessage';
 import { StreamingMessage, type StreamingMessageHandle } from '../components/StreamingMessage';
 import { AgentConfigPanel } from '../components/AgentConfigPanel';
@@ -205,6 +207,8 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
   const [showConfig, setShowConfig] = useState(false);
   const [config, setConfig] = useState<AgentConfig>(agentService.getConfig());
   const [backendStatus, setBackendStatus] = useState<'unknown' | 'ok' | 'error'>('unknown');
+  const [segReloadChecking, setSegReloadChecking] = useState(false);
+  const [availableSegCount, setAvailableSegCount] = useState(0);
 
   // ── Radiomics tab ─────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<'chat' | 'radiomics' | 'reports'>('chat');
@@ -552,12 +556,76 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
     };
   }, [selectedReportFilename]); // activeStudyUIDRef intentionally excluded (it's a ref)
 
-  // Check backend health on mount and after config change
+  // Check backend health and load segmentation models on mount / backend URL change
   useEffect(() => {
     agentService.checkBackendHealth().then(({ ok }) => {
       setBackendStatus(ok ? 'ok' : 'error');
     });
+    agentService.refreshSegmentationModels().then(() => {
+      setConfig(agentService.getConfig());
+    });
   }, [config.backendUrl]);
+
+  const refreshAvailableSegCount = useCallback(async () => {
+    const discovery = await discoverStudySegmentations(extensionManager, services, activeStudyUID);
+    setAvailableSegCount(discovery?.segSeriesInstanceUIDs.length ?? 0);
+  }, [extensionManager, services, activeStudyUID]);
+
+  useEffect(() => {
+    refreshAvailableSegCount().catch(() => setAvailableSegCount(0));
+  }, [refreshAvailableSegCount]);
+
+  useEffect(() => {
+    if (!services) {
+      return undefined;
+    }
+    const { displaySetService } = services.services;
+    const event = displaySetService.EVENTS?.DISPLAY_SETS_CHANGED ?? 'DISPLAY_SETS_CHANGED';
+    const unsub = displaySetService.subscribe?.(event, () => {
+      refreshAvailableSegCount().catch(() => undefined);
+    });
+    return () => unsub?.unsubscribe?.();
+  }, [services, refreshAvailableSegCount]);
+
+  const handleOpenSegmentationMode = useCallback(async () => {
+    if (!activeStudyUID || !services) {
+      return;
+    }
+
+    setSegReloadChecking(true);
+    try {
+      const discovery = await discoverStudySegmentations(
+        extensionManager,
+        services,
+        activeStudyUID
+      );
+
+      if (!discovery || discovery.segSeriesInstanceUIDs.length === 0) {
+        services.services.uiNotificationService?.show?.({
+          title: 'MAIA Radiology Assistant',
+          message:
+            'No DICOM SEG series found for this study. Run segmentation first or reload the study list.',
+          type: 'warning',
+          duration: 5000,
+        });
+        setAvailableSegCount(0);
+        return;
+      }
+
+      const dataSourceName = extensionManager?.activeDataSourceName as string | undefined;
+      const url = buildSegmentationViewerUrl(discovery.viewerReload, dataSourceName);
+      window.location.assign(url);
+    } catch (error) {
+      services.services.uiNotificationService?.show?.({
+        title: 'MAIA Radiology Assistant',
+        message: error instanceof Error ? error.message : 'Failed to discover DICOM SEG series.',
+        type: 'error',
+        duration: 5000,
+      });
+    } finally {
+      setSegReloadChecking(false);
+    }
+  }, [activeStudyUID, extensionManager, services]);
 
   const handleSend = useCallback(
     async (textOverride?: string) => {
@@ -597,7 +665,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
         },
       ]);
 
-      const historyForBackend = messages.filter(m => m.role !== 'tool');
+      const historyForBackend = messages.filter(m => m.role !== 'tool' && m.role !== 'log');
 
       await agentService.sendMessage(
         text,
@@ -684,11 +752,40 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
         });
         break;
 
+      case 'tool_log':
+        setMessages(prev => {
+          const updated = [...prev];
+          let logIdx = -1;
+          for (let i = updated.length - 1; i >= 0; i--) {
+            if (updated[i].role === 'log' && updated[i].logActive) {
+              logIdx = i;
+              break;
+            }
+          }
+          if (logIdx >= 0) {
+            const logs = [...(updated[logIdx].toolLogs ?? []), event.content];
+            updated[logIdx] = { ...updated[logIdx], toolLogs: logs.slice(-200) };
+          } else {
+            updated.push({
+              id: nextId(),
+              role: 'log',
+              content: '',
+              toolLogs: [event.content],
+              logActive: true,
+              toolName: event.toolName,
+              timestamp: new Date(),
+            });
+          }
+          return updated;
+        });
+        break;
+
       case 'tool_end': {
         // event.downloadUrl is a server-relative path set by result-generating
         // tools (e.g. extract_radiomics). Build the full URL and derive the filename.
         let downloadUrl: string | undefined;
         let downloadFilename: string | undefined;
+        let viewerReloadUrl: string | undefined;
         if (event.downloadUrl) {
           downloadUrl = buildBackendUrl(
             agentService.getConfig().backendUrl,
@@ -703,6 +800,11 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
           }
         }
 
+        if (event.viewerReload) {
+          const dataSourceName = extensionManager?.activeDataSourceName as string | undefined;
+          viewerReloadUrl = buildSegmentationViewerUrl(event.viewerReload, dataSourceName);
+        }
+
         // Update the last running tool message to success/error.
         // toolResult is intentionally not stored — it is never rendered and
         // can be very large (full radiomics JSON), which would bloat React
@@ -715,7 +817,15 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
                 ...updated[i],
                 toolStatus: event.type === 'tool_end' ? 'success' : 'error',
                 ...(downloadUrl ? { downloadUrl, downloadFilename } : {}),
+                ...(event.viewerReload ? { viewerReload: event.viewerReload } : {}),
+                ...(viewerReloadUrl ? { viewerReloadUrl } : {}),
               };
+              break;
+            }
+          }
+          for (let i = updated.length - 1; i >= 0; i--) {
+            if (updated[i].role === 'log' && updated[i].logActive) {
+              updated[i] = { ...updated[i], logActive: false };
               break;
             }
           }
@@ -725,6 +835,10 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
         // Re-fetch radiomics CSV if a radiomics tool just completed.
         if (event.toolName?.toLowerCase().includes('radiomics')) {
           triggerRadiomicsRefetchRef.current();
+        }
+
+        if (event.toolName === 'run_monet_segmentation') {
+          refreshAvailableSegCount().catch(() => undefined);
         }
         break;
       }
@@ -749,7 +863,7 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
         }
         break;
     }
-  }, []);
+  }, [extensionManager, refreshAvailableSegCount]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -848,16 +962,38 @@ export function PanelAIAssistant({ servicesManager, commandsManager }: Props) {
       </div>
 
       {/* LLM + model info bar */}
-      <div className="bg-gray-850 flex shrink-0 items-center gap-2 border-b border-gray-800 px-3 py-1">
-        <span className="text-xs text-gray-500">
-          {config.llmProvider} / {config.llmModel}
-        </span>
-        <span className="text-gray-700">|</span>
-        <span className="text-xs text-gray-500">
-          Seg:{' '}
-          {config.segmentationModels.find(m => m.id === config.activeSegmentationModel)?.name ??
-            config.activeSegmentationModel}
-        </span>
+      <div className="bg-gray-850 flex shrink-0 flex-col gap-2 border-b border-gray-800 px-3 py-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">
+            {config.llmProvider} / {config.llmModel}
+          </span>
+          <span className="text-gray-700">|</span>
+          <span className="text-xs text-gray-500">
+            Seg:{' '}
+            {config.segmentationModels.find(m => m.id === config.activeSegmentationModel)?.name ??
+              config.activeSegmentationModel}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleOpenSegmentationMode()}
+            disabled={!activeStudyUID || segReloadChecking}
+            title={
+              availableSegCount > 0
+                ? `Reload in Segmentation mode (${availableSegCount} DICOM SEG series detected)`
+                : 'Search for DICOM SEG series and open Segmentation mode'
+            }
+            className="inline-flex items-center gap-1.5 rounded border border-blue-700/70 bg-blue-950/40 px-2 py-1 text-xs font-medium text-blue-200 hover:bg-blue-900/50 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800/40 disabled:text-gray-500"
+          >
+            {segReloadChecking ? 'Checking SEG…' : '↻ Open Segmentation Mode'}
+          </button>
+          {availableSegCount > 0 && (
+            <span className="text-[11px] text-blue-300/80">
+              {availableSegCount} DICOM SEG {availableSegCount === 1 ? 'series' : 'series'} found
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Tab bar — shown whenever at least one non-chat tab has data */}

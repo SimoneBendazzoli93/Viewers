@@ -87,23 +87,41 @@ def resolve_dicomweb_url(provided: str | None) -> str:
 
 # ── DICOMwebClient factory ────────────────────────────────────────────────────
 
-def _build_client(cfg: DicomWebConfig) -> DICOMwebClient:
-    """
-    Build a :class:`DICOMwebClient` configured from a :class:`DicomWebConfig`.
-
-    Applies content-type tweaks for static WADO servers and singlepart support.
-    """
+def _client_headers(cfg: DicomWebConfig) -> dict[str, str]:
     headers: dict[str, str] = {}
     if cfg.auth_token:
         headers["Authorization"] = f"Bearer {cfg.auth_token}"
-
     # For static WADO servers the Accept header must be permissive; the server
     # won't do content negotiation, it just serves pre-generated files.
     if cfg.static_wado:
-        headers.setdefault("Accept", "multipart/related; type=\"application/octet-stream\", */*")
+        headers.setdefault(
+            "Accept",
+            'multipart/related; type="application/octet-stream", */*',
+        )
+    return headers
 
-    client = DICOMwebClient(url=cfg.wado_root, headers=headers)
-    return client
+
+def _build_client(cfg: DicomWebConfig) -> DICOMwebClient:
+    """Build a WADO-RS :class:`DICOMwebClient`."""
+    return DICOMwebClient(url=cfg.wado_root, headers=_client_headers(cfg))
+
+
+def _build_qido_client(cfg: DicomWebConfig) -> DICOMwebClient:
+    """Build a QIDO-RS :class:`DICOMwebClient` for search/metadata operations."""
+    qido_root = cfg.qido_root or cfg.wado_root
+    return DICOMwebClient(url=qido_root, headers=_client_headers(cfg))
+
+
+def _qido_tag_value(dataset: dict, tag: str, keyword: str, default: str = "") -> str:
+    """Extract a single string value from a QIDO-RS JSON dataset entry."""
+    entry = dataset.get(keyword) or dataset.get(tag) or {}
+    if not isinstance(entry, dict):
+        return str(entry) if entry is not None else default
+    values = entry.get("Value") or []
+    if not values:
+        return default
+    value = values[0]
+    return str(value) if value is not None else default
 
 
 # ── Public helpers ────────────────────────────────────────────────────────────
@@ -140,29 +158,39 @@ def fetch_series_to_dir(
     return sorted(saved)
 
 
-def get_study_metadata(
-    dicomweb_url: str,
+def fetch_study_series_metadata(
     study_uid: str,
+    dicomweb_url: str | None = None,
     auth_token: Optional[str] = None,
 ) -> dict:
-    """Return study-level metadata as a dict (uses QIDO-RS search)."""
+    """
+    Query QIDO-RS for all series in a study.
+
+    Returns a dict with ``study_instance_uid`` and a ``series`` list; each entry
+    includes ``series_instance_uid``, ``modality``, and optional description/number.
+    """
     cfg = resolve_dicomweb_config(provided_wado_root=dicomweb_url)
     cfg.auth_token = auth_token
-    # For metadata / search use the QIDO root
-    client = DICOMwebClient(url=cfg.qido_root, headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {})
+    client = _build_qido_client(cfg)
 
     series_list = client.search_for_series(study_instance_uid=study_uid)
+    series_entries: list[dict] = []
+    for s in series_list:
+        series_uid = _qido_tag_value(s, "0020000E", "SeriesInstanceUID")
+        if not series_uid:
+            continue
+        series_number_raw = _qido_tag_value(s, "00200011", "SeriesNumber")
+        series_entries.append({
+            "series_instance_uid": series_uid,
+            "modality": _qido_tag_value(s, "00080060", "Modality"),
+            "series_description": _qido_tag_value(s, "0008103E", "SeriesDescription"),
+            "series_number": int(series_number_raw) if series_number_raw.isdigit() else series_number_raw,
+        })
+
     return {
         "study_instance_uid": study_uid,
-        "series": [
-            {
-                "SeriesInstanceUID": s.get("0020000E", {}).get("Value", [""])[0],
-                "Modality": s.get("00080060", {}).get("Value", [""])[0],
-                "SeriesDescription": s.get("0008103E", {}).get("Value", [""])[0],
-                "SeriesNumber": s.get("00200011", {}).get("Value", [None])[0],
-            }
-            for s in series_list
-        ],
+        "series_count": len(series_entries),
+        "series": series_entries,
     }
 
 
